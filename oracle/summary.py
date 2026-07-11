@@ -108,6 +108,55 @@ def _check_schema(summaries: list[dict]) -> None:
             )
 
 
+def _check_shard_set(summaries: list[dict], expected_chroms: set[str] | None) -> None:
+    """The shard SET itself must be exactly right: no duplicates, no failures, no holes.
+
+    Every one of these is a live failure mode of the sharded WGS run, not a
+    hypothetical:
+
+    * DUPLICATES -- the cluster's 24h wall-clock cap actively manufactures them: a
+      job times out, is resubmitted, and the glob picks up BOTH outputs. Summed
+      twice, chr22's 900 matches + 100 mismatches turned 1500 comparisons into 2500
+      and 93.333% into 92.0% with no exception raised.
+    * FAILED SHARDS -- merge() used to hardcode ``"status": "ok"`` and never look at
+      its inputs, laundering a shard that failed into a clean whole-genome summary.
+    * HOLES -- if chr7's job dies and its JSON is never written, merge() would
+      cheerfully publish a "whole-genome" number computed from 21 chromosomes.
+    """
+    seen: dict[str, int] = {}
+    for i, s in enumerate(summaries):
+        chrom = s["chrom"]
+        if chrom in seen:
+            raise ValueError(
+                f"merge(): chromosome {chrom!r} appears in shard {seen[chrom]} AND "
+                f"shard {i}. A resubmitted job's output was globbed alongside the "
+                f"original: merging both DOUBLE-COUNTS every one of its annotations "
+                f"and silently moves the published concordance. De-duplicate the "
+                f"shard JSONs (keep exactly one per chromosome) and re-run."
+            )
+        seen[chrom] = i
+        if s["status"] != "ok":
+            raise ValueError(
+                f"merge(): shard {i} (chrom {chrom!r}) has status {s['status']!r}, "
+                f"not 'ok'. Refusing to merge a shard that did not complete -- its "
+                f"counters are partial, and folding them in would understate coverage "
+                f"while reading as a clean whole-genome result."
+            )
+
+    if expected_chroms is not None:
+        got = set(seen)
+        missing = sorted(expected_chroms - got)
+        unexpected = sorted(got - expected_chroms)
+        if missing or unexpected:
+            raise ValueError(
+                f"merge(): shard set does not cover the expected chromosomes -- "
+                f"missing={missing} unexpected={unexpected}. A whole-genome number "
+                f"must not be published from a partial shard set (a job that died "
+                f"without writing its JSON would otherwise just vanish from the "
+                f"denominator)."
+            )
+
+
 def _check_mergeable(summaries: list[dict]) -> None:
     """Shards must describe the SAME combo over the SAME fields, else the summed
     counters are silently wrong. Fail loudly rather than narrow to shard 0."""
@@ -148,7 +197,7 @@ def _check_mergeable(summaries: list[dict]) -> None:
                 )
 
 
-def merge(summaries: list[dict]) -> dict:
+def merge(summaries: list[dict], *, expected_chroms: set[str] | None = None) -> dict:
     """Merge per-shard summaries of the SAME combo into one whole-genome summary.
 
     Everything a shard carries survives: counters are SUMMED, `join_rate` is
@@ -157,10 +206,16 @@ def merge(summaries: list[dict]) -> dict:
     50%, while the truth is 2%), schema facts are asserted equal and carried, and
     the per-shard `chrom` / `mismatches_tsv` are collected into `chroms` /
     `mismatches_tsvs`.
+
+    `expected_chroms` is the completeness contract: pass the chromosomes the run was
+    supposed to cover (the report step passes chr1..chr22) and merge() refuses a
+    shard set that does not match it exactly. Without it, a chromosome whose job
+    died simply disappears from the denominator.
     """
     if not summaries:
         raise ValueError("merge() needs at least one summary")
     _check_schema(summaries)
+    _check_shard_set(summaries, expected_chroms)
     _check_mergeable(summaries)
     base = summaries[0]
     fields = list(base["per_field"])
@@ -198,7 +253,10 @@ def merge(summaries: list[dict]) -> dict:
     seen = aligned + summed["only_vepyr"] + summed["only_gt"]
 
     return {
-        "name": base["name"], "cache": base["cache"], "status": "ok",
+        "name": base["name"], "cache": base["cache"],
+        # DERIVED, never hardcoded: _check_shard_set() has already refused anything
+        # that is not "ok", so this can only ever restate what the shards said.
+        "status": base["status"],
         **summed,
         "join_rate": round(aligned / seen, 4) if seen else None,
         "overall_pct": _pct(T - M, T),

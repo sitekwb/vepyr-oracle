@@ -163,3 +163,56 @@ def test_merge_refuses_a_half_schema_shard():
     del b["only_gt"]
     with pytest.raises(ValueError, match="only_gt"):
         merge([a, b])
+
+
+# --- CRITICAL 3: the 24h job cap ACTIVELY MANUFACTURES duplicate shards (a job ---
+# --- times out, is resubmitted, both outputs get globbed). merge() summed them ---
+# --- twice without a murmur; it also stamped "ok" on failed shards and produced --
+# --- a "whole-genome" number from whatever subset of chromosomes happened to be --
+# --- on disk. -------------------------------------------------------------------
+
+def test_merge_rejects_a_resubmitted_duplicate_shard():
+    """chr22 globbed twice -> 2500 comparisons where the truth is 1500."""
+    shards = [
+        _shard("22", match=900, mismatch=100),
+        _shard("21", match=500),
+        _shard("22", match=900, mismatch=100),      # the resubmitted job's output
+    ]
+    with pytest.raises(ValueError, match="22"):
+        merge(shards)
+
+
+def test_merge_of_the_deduplicated_shards_is_the_truthful_number():
+    m = merge([_shard("22", match=900, mismatch=100), _shard("21", match=500)])
+    assert m["per_field"]["SIFT"]["total"] == 1500
+    assert m["overall_pct"] == round(100 * 1400 / 1500, 3)      # 93.333, not 92.0
+
+
+def test_merge_refuses_to_bless_a_failed_shard_as_ok():
+    with pytest.raises(ValueError, match="failed"):
+        merge([_shard("21"), _shard("22", status="failed")])
+
+
+def test_merge_derives_status_from_the_shards_rather_than_hardcoding_ok():
+    assert merge([_shard("21"), _shard("22")])["status"] == "ok"
+
+
+def test_merge_raises_when_an_expected_chromosome_is_missing():
+    """chr7's job died and its JSON was never written -> NOT a whole-genome number."""
+    expected = {str(i) for i in range(1, 23)}
+    present = expected - {"7"}
+    with pytest.raises(ValueError) as ei:
+        merge([_shard(c) for c in sorted(present)], expected_chroms=expected)
+    assert "7" in str(ei.value)
+    assert "missing" in str(ei.value).lower()
+
+
+def test_merge_raises_when_an_unexpected_chromosome_shows_up():
+    with pytest.raises(ValueError, match="unexpected|22"):
+        merge([_shard("21"), _shard("22")], expected_chroms={"21"})
+
+
+def test_merge_accepts_the_complete_expected_set():
+    expected = {"21", "22"}
+    m = merge([_shard("21"), _shard("22")], expected_chroms=expected)
+    assert set(m["chroms"]) == expected
