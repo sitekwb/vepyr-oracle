@@ -19,6 +19,34 @@ def _reader(path, fields, feat_i, chrom=None):
                 yield rec
 
 
+def _checked(gen, stream: str, rank):
+    """Fail loudly if a stream is not strictly ascending in (contig_rank, pos).
+
+    The merge-join advances two pointers in lockstep and can only do that over
+    globally sorted streams. On an unsorted stream it does NOT crash -- it walks
+    straight past records that would have matched, dumping them into
+    only_vepyr/only_gt and starving the per-field counters. The report then looks
+    like annotation drift when it is really a plumbing bug. Concatenated per-chrom
+    shards and karyotypic-vs-lexicographic contig collation both produce exactly
+    this, so guard the invariant instead of trusting it.
+    """
+    prev = None
+    for pos_key, buf in gen:
+        if prev is not None and rank(pos_key) <= rank(prev):
+            raise ValueError(
+                f"{stream} not sorted by (contig_rank,pos): "
+                f"{pos_key[0]}:{pos_key[1]} came after {prev[0]}:{prev[1]}. "
+                f"The merge-join requires both VCFs strictly ascending in "
+                f"(contig_rank,pos), where contig rank comes from the ground-truth "
+                f"VCF's ##contig header order -- so a contig-collation mismatch "
+                f"(karyotypic vs lexicographic), a contig missing from that header, "
+                f"or concatenated per-chrom shards will trip this. Refusing to "
+                f"continue: diffing an unsorted stream silently undercounts matches."
+            )
+        prev = pos_key
+        yield pos_key, buf
+
+
 def _grouped(gen):
     """Collapse consecutive records at the same (chrom,pos) into {(ref,alt): feats}."""
     cur_key = None
@@ -58,8 +86,8 @@ def diff_files(vepyr_vcf: str, gt_vcf: str, *, name: str, cache: str,
         writer = csv.writer(tsv_file, delimiter="\t")
         writer.writerow(TSV_HEADER)
 
-        vg = _grouped(_reader(vepyr_vcf, vf, v_feat, cf))
-        gg = _grouped(_reader(gt_vcf, gf, g_feat, cf))
+        vg = _checked(_grouped(_reader(vepyr_vcf, vf, v_feat, cf)), "vepyr_vcf", rank)
+        gg = _checked(_grouped(_reader(gt_vcf, gf, g_feat, cf)), "gt_vcf", rank)
         V, G = next(vg, None), next(gg, None)
         while V and G:
             if rank(V[0]) < rank(G[0]):
