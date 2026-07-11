@@ -178,8 +178,15 @@ def test_merge_rejects_a_resubmitted_duplicate_shard():
         _shard("21", match=500),
         _shard("22", match=900, mismatch=100),      # the resubmitted job's output
     ]
-    with pytest.raises(ValueError, match="22"):
+    with pytest.raises(ValueError) as ei:
         merge(shards)
+    msg = str(ei.value)
+    assert "'22'" in msg
+    # ...and it must say WHY, so the OTHER way this error can be reached -- someone
+    # wiring a sub-chromosomal (region) diff shard -- is self-explaining rather than
+    # looking like a spurious duplicate.
+    assert "chromosome-atomic" in msg
+    assert "VCF level" in msg
 
 
 def test_merge_of_the_deduplicated_shards_is_the_truthful_number():

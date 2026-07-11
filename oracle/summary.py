@@ -129,10 +129,17 @@ def _check_shard_set(summaries: list[dict], expected_chroms: set[str] | None) ->
         if chrom in seen:
             raise ValueError(
                 f"merge(): chromosome {chrom!r} appears in shard {seen[chrom]} AND "
-                f"shard {i}. A resubmitted job's output was globbed alongside the "
-                f"original: merging both DOUBLE-COUNTS every one of its annotations "
-                f"and silently moves the published concordance. De-duplicate the "
-                f"shard JSONs (keep exactly one per chromosome) and re-run."
+                f"shard {i}. Two ways to get here, and merge() cannot tell them apart "
+                f"-- both are wrong:\n"
+                f"  (a) a resubmitted job's output was globbed alongside the original "
+                f"(the 24h wall-clock cap manufactures this). Merging both "
+                f"DOUBLE-COUNTS every one of its annotations and silently moves the "
+                f"published concordance. De-duplicate the shard JSONs -- keep exactly "
+                f"one per chromosome -- and re-run.\n"
+                f"  (b) someone produced SUB-CHROMOSOMAL (region) diff shards. "
+                f"merge() requires chromosome-atomic shards: sub-chromosomal splits "
+                f"must be concatenated at the VCF level (bcftools concat) BEFORE "
+                f"diffing, never summed as separate summaries afterwards."
             )
         seen[chrom] = i
         if s["status"] != "ok":
@@ -211,6 +218,23 @@ def merge(summaries: list[dict], *, expected_chroms: set[str] | None = None) -> 
     supposed to cover (the report step passes chr1..chr22) and merge() refuses a
     shard set that does not match it exactly. Without it, a chromosome whose job
     died simply disappears from the denominator.
+
+    THE SHARD CONTRACT (enforced, not assumed -- an unwritten assumption is how
+    every bug in this module got here):
+
+    * Shards are **chromosome-atomic**. One summary JSON per chromosome, or one for
+      the whole genome. `chrom` is the shard's identity, and it is what the
+      duplicate check keys on.
+    * Sub-chromosomal splitting is a **VCF-level** concern that happens strictly
+      BEFORE diffing. The pipeline's other sharded steps may go sub-chromosomal --
+      real-VEP ground-truth generation must, since a whole-genome VEP run blows the
+      24h cap -- but their region shards are stitched back together with `bcftools
+      concat` and never reach this function. `diff_files()` (the only producer of
+      summary JSONs) runs whole-genome or per-chromosome.
+    * Region shards are therefore NOT supported here, deliberately: nothing produces
+      them, and summing region summaries would need a shard identity of
+      (chrom, start, end) plus an overlap check to stay honest. If one ever appears,
+      the duplicate-chrom guard rejects it with an error that explains this.
     """
     if not summaries:
         raise ValueError("merge() needs at least one summary")
