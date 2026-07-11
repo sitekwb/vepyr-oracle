@@ -16,11 +16,11 @@ def test_vep_only_is_a_vepyr_gap():
 def test_value_diff_when_both_populated_and_differ():
     assert classify("Feature", HGVS_ON, "ENST1", "ENST2") == Category.VALUE_DIFF
 
-def test_numeric_within_epsilon_is_rounding():
-    assert classify("gnomADe_AF", HGVS_ON, "0.1234", "0.1235", eps=1e-3) == Category.NUMERIC_TOL
+def test_numeric_within_tolerance_is_rounding():
+    assert classify("gnomADe_AF", HGVS_ON, "0.1234", "0.1235") == Category.NUMERIC_TOL
 
-def test_numeric_beyond_epsilon_is_a_real_value_diff():
-    assert classify("gnomADe_AF", HGVS_ON, "0.10", "0.90", eps=1e-3) == Category.VALUE_DIFF
+def test_numeric_beyond_tolerance_is_a_real_value_diff():
+    assert classify("gnomADe_AF", HGVS_ON, "0.10", "0.90") == Category.VALUE_DIFF
 
 def test_same_multivalue_set_different_order_is_cosmetic():
     assert classify("Consequence", HGVS_ON, "missense&splice", "splice&missense") == Category.ORDER_DIFF
@@ -47,3 +47,43 @@ def test_vepyr_empty_where_vep_populated_is_a_gap_not_flag_expected():
 def test_both_populated_and_different_is_a_value_diff_not_flag_expected():
     """vepyr emits a WRONG HGVSc. The flag cannot make a wrong value not-a-bug."""
     assert classify("HGVSc", HGVS_OFF, "c.1A>G", "c.999T>C") == Category.VALUE_DIFF
+
+
+# --- IMPORTANT 9: the tolerance was ABSOLUTE (1e-4). Rare-variant allele -----------
+# --- frequencies live ENTIRELY inside that epsilon, so vepyr reporting AF=0 where --
+# --- gnomAD says 8e-5 -- an allele ABSENT vs an allele SEEN -- was filed "rounding". -
+
+def test_zero_versus_a_rare_allele_frequency_is_not_rounding():
+    """100% relative error. vepyr says the allele is absent; gnomAD says it is not."""
+    assert classify("gnomADe_AF", HGVS_ON, "0", "0.00008") == Category.VALUE_DIFF
+
+
+def test_rare_afs_an_order_of_magnitude_apart_are_not_rounding():
+    """89% relative error, and both values sit inside the old absolute epsilon."""
+    assert classify("gnomADe_AF", HGVS_ON, "1e-05", "9e-05") == Category.VALUE_DIFF
+
+
+def test_last_digit_formatting_noise_on_a_rare_af_is_still_rounding():
+    assert classify("gnomADe_AF", HGVS_ON, "0.00008", "0.000080001") == Category.NUMERIC_TOL
+
+
+def test_the_default_tolerance_is_relative_not_absolute():
+    """Exercises the shipped defaults -- nothing used to."""
+    assert classify("CADD_PHRED", HGVS_ON, "25.100", "25.1001") == Category.NUMERIC_TOL
+    assert classify("CADD_PHRED", HGVS_ON, "25.1", "25.2") == Category.VALUE_DIFF
+
+
+# --- ...and _as_float was permissive enough to invent numbers out of non-numbers. --
+
+def test_whitespace_padded_value_is_not_treated_as_a_number():
+    assert classify("gnomADe_AF", HGVS_ON, " 1 ", "1") == Category.VALUE_DIFF
+
+
+def test_underscored_digits_are_not_silently_parsed_as_ten():
+    """float('1_0') == 10.0, so '1_0' vs '10' used to be 'rounding'."""
+    assert classify("gnomADe_AF", HGVS_ON, "1_0", "10") == Category.VALUE_DIFF
+
+
+def test_infinity_and_nan_are_not_numbers():
+    assert classify("CADD_PHRED", HGVS_ON, "inf", "1e400") == Category.VALUE_DIFF
+    assert classify("CADD_PHRED", HGVS_ON, "nan", "0") == Category.VALUE_DIFF

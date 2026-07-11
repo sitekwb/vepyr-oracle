@@ -1,5 +1,7 @@
 """Drift taxonomy: exactly one category per mismatching (variant, feature, field)."""
 from __future__ import annotations
+import math
+import re
 from enum import StrEnum
 
 
@@ -8,7 +10,7 @@ class Category(StrEnum):
     VEP_ONLY      = "vep_only"        # VEP populated, vepyr empty -> vepyr GAP (highest priority)
     VEPYR_ONLY    = "vepyr_only"      # vepyr populated, VEP empty
     VALUE_DIFF    = "value_diff"      # both populated, differ -> the real signal
-    NUMERIC_TOL   = "numeric_tol"     # both numeric, differ within epsilon -> rounding
+    NUMERIC_TOL   = "numeric_tol"     # both numeric, agree within tolerance -> rounding
     ORDER_DIFF    = "order_diff"      # same multi-value set, different order -> cosmetic
 
 
@@ -23,7 +25,31 @@ FIELD_REQUIRES_FLAG: dict[str, str] = {
 #: separators VEP uses inside a single CSQ field for multi-values
 _MULTI_SEPS = ("&", ",")
 
-DEFAULT_EPS = 1e-4
+#: Numeric agreement is RELATIVE, with NO absolute floor.
+#:
+#: `DEFAULT_REL_TOL = 1e-3` (0.1%): VEP prints numeric CSQ values to a handful of
+#: significant figures (gnomAD AFs ~4-6 sf, CADD/SIFT/PolyPhen 2-3 sf), so two
+#: implementations reading the same source data can differ in the last printed digit
+#: and no further. 0.1% sits comfortably above last-digit formatting noise at 4+ sf
+#: and far below any difference a scientist would call the same number.
+#:
+#: `DEFAULT_ABS_TOL = 0.0`: an absolute floor is precisely what made the old
+#: `eps = 1e-4` unsafe. ANY floor F silently blesses "vepyr says 0, gnomAD says F/2"
+#: -- and rare-variant allele frequencies live ENTIRELY inside 1e-4:
+#:     vepyr=0      VEP=0.00008  -> "rounding" (100% relative error)
+#:     vepyr=1e-05  VEP=9e-05    -> "rounding" ( 89% relative error)
+#: AF=0 (allele absent) vs AF=8e-5 (allele observed) is a categorical difference, not
+#: a rounding artefact. With no floor, the only pairs tolerated are those within 0.1%
+#: OF EACH OTHER, which can never include zero-vs-nonzero. Values that are exactly
+#: equal never reach here (string equality short-circuits), and math.isclose still
+#: closes -0.0 against 0.0.
+DEFAULT_REL_TOL = 1e-3
+DEFAULT_ABS_TOL = 0.0
+
+#: A CSQ value is a number only if it LOOKS like one. `float()` alone accepts
+#: `" 1 "` (surrounding whitespace), `"1_0"` (PEP 515 underscores -> 10.0!), `"inf"`
+#: and `"nan"`, so `"1_0"` vs `"10"` compared equal and was filed as rounding.
+_NUMERIC_RE = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
 
 
 def is_flag_expected(field: str, combo_kwargs: dict, vepyr_val: str, vep_val: str) -> bool:
@@ -48,9 +74,12 @@ def is_flag_expected(field: str, combo_kwargs: dict, vepyr_val: str, vep_val: st
 
 
 def _as_float(v: str) -> float | None:
+    """float(v), but only for strings that actually look like a decimal number."""
+    if not isinstance(v, str) or not _NUMERIC_RE.match(v):
+        return None
     try:
         return float(v)
-    except (TypeError, ValueError):
+    except ValueError:            # pragma: no cover -- the regex already excludes these
         return None
 
 
@@ -64,7 +93,8 @@ def _same_set_diff_order(a: str, b: str) -> bool:
 
 
 def classify(field: str, combo_kwargs: dict, vepyr_val: str, vep_val: str,
-             eps: float = DEFAULT_EPS) -> Category | None:
+             rel_tol: float = DEFAULT_REL_TOL,
+             abs_tol: float = DEFAULT_ABS_TOL) -> Category | None:
     """None when the values agree (not a mismatch)."""
     if vepyr_val == vep_val:
         return None
@@ -76,7 +106,9 @@ def classify(field: str, combo_kwargs: dict, vepyr_val: str, vep_val: str,
         return Category.VEPYR_ONLY
     fa, fb = _as_float(vepyr_val), _as_float(vep_val)
     if fa is not None and fb is not None:
-        return Category.NUMERIC_TOL if abs(fa - fb) <= eps else Category.VALUE_DIFF
+        return (Category.NUMERIC_TOL
+                if math.isclose(fa, fb, rel_tol=rel_tol, abs_tol=abs_tol)
+                else Category.VALUE_DIFF)
     if _same_set_diff_order(vepyr_val, vep_val):
         return Category.ORDER_DIFF
     return Category.VALUE_DIFF

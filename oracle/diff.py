@@ -98,7 +98,7 @@ def _annotations(buf: dict) -> int:
 
 def diff_files(vepyr_vcf: str, gt_vcf: str, *, name: str, cache: str,
                combo_kwargs: dict, tsv_path: str, chrom: str | None = None,
-               eps: float | None = None) -> dict:
+               rel_tol: float | None = None, abs_tol: float | None = None) -> dict:
     vf = csq_format_fields(vepyr_vcf)
     gf = csq_format_fields(gt_vcf)
     shared = [f for f in vf if f in gf]
@@ -155,7 +155,7 @@ def diff_files(vepyr_vcf: str, gt_vcf: str, *, name: str, cache: str,
     # but counted so their existence is never invisible in the report.
     v_stats, g_stats = {"malformed": 0}, {"malformed": 0}
 
-    kw = {} if eps is None else {"eps": eps}
+    kw = {k: v for k, v in (("rel_tol", rel_tol), ("abs_tol", abs_tol)) if v is not None}
 
     with open(tsv_path, "w", newline="") as tsv_file:
         writer = csv.writer(tsv_file, delimiter="\t")
