@@ -105,6 +105,28 @@ def test_truncated_entries_never_cross_pair_and_are_counted(tmp_path):
     assert list(csv.DictReader(tsv.open(), delimiter="\t")) == []
 
 
+# --- Fix D: CSQ annotations are keyed by (Allele, Feature). A multi-allelic ------
+# --- record carries one entry per (allele, transcript); keying by Feature alone --
+# --- made same-transcript entries overwrite each other, so half the annotations --
+# --- vanished and the survivors were diffed ACROSS alleles. -----------------------
+
+def test_multiallelic_alleles_do_not_overwrite_each_other(tmp_path):
+    tsv = tmp_path / "m.tsv"
+    # One multi-allelic record (C -> T,CCGC), 4 CSQ entries = 2 alleles x 2
+    # transcripts, IDENTICAL values on both sides but with the ALLELES LISTED IN
+    # OPPOSITE ORDER. Any mismatch here is false by construction.
+    s = diff_files(str(FIX / "vepyr_multiallelic.vcf"), str(FIX / "gt_multiallelic.vcf"),
+                   name="c", cache="k", combo_kwargs=COMBO_HGVS, tsv_path=str(tsv))
+
+    assert s["aligned_annotations"] == 4          # allele x transcript pairs, not 2
+    assert s["overall_pct"] == 100.0
+    produced = {c for pf in s["per_field"].values() for c in pf["by_category"]}
+    assert produced == set()
+    assert s["malformed_vepyr"] == 0
+    assert s["malformed_gt"] == 0
+    assert list(csv.DictReader(tsv.open(), delimiter="\t")) == []
+
+
 def test_clean_files_report_zero_malformed(tmp_path):
     s = diff_files(str(FIX / "vepyr_mini.vcf"), str(FIX / "gt_mini.vcf"),
                    name="c", cache="k", combo_kwargs=COMBO_NO_HGVS,

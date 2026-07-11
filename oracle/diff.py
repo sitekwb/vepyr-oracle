@@ -5,17 +5,19 @@ from .csq import open_maybe_gzip, csq_format_fields, chrom_ranks, norm_chrom, pa
 from .drift import classify
 from .summary import new_accumulator, record_match, record_mismatch, finalize
 
-TSV_HEADER = ["chrom", "pos", "ref", "alt", "feature", "field",
+#: `allele` is load-bearing, not decoration: on a multi-allelic record a
+#: (chrom,pos,ref,alt,feature) tuple no longer identifies a single annotation.
+TSV_HEADER = ["chrom", "pos", "ref", "alt", "allele", "feature", "field",
               "vepyr_val", "vep_val", "category"]
 
 
-def _reader(path, fields, feat_i, chrom=None, stats=None):
+def _reader(path, fields, feat_i, allele_i, chrom=None, stats=None):
     """Yield (key, feats); tally keyless (malformed) CSQ entries into `stats`."""
     with open_maybe_gzip(path) as f:
         for line in f:
             if line.startswith("#"):
                 continue
-            rec = parse_record(line, fields, feat_i)
+            rec = parse_record(line, fields, feat_i, allele_i)
             if rec is None:
                 continue
             key, feats, malformed = rec
@@ -82,8 +84,10 @@ def diff_files(vepyr_vcf: str, gt_vcf: str, *, name: str, cache: str,
     # would otherwise leave a report that is 100% green on the fields it does emit.
     vepyr_only_fields = sorted(set(vf) - set(gf))
     gt_only_fields = sorted(set(gf) - set(vf))
-    v_feat = {f: i for i, f in enumerate(vf)}.get("Feature")
-    g_feat = {f: i for i, f in enumerate(gf)}.get("Feature")
+    v_idx = {f: i for i, f in enumerate(vf)}
+    g_idx = {f: i for i, f in enumerate(gf)}
+    v_feat, v_allele = v_idx.get("Feature"), v_idx.get("Allele")
+    g_feat, g_allele = g_idx.get("Feature"), g_idx.get("Allele")
 
     ranks = chrom_ranks(gt_vcf) or chrom_ranks(vepyr_vcf)
     rank = lambda pk: (ranks.get(pk[0], 9999), pk[1])
@@ -101,8 +105,10 @@ def diff_files(vepyr_vcf: str, gt_vcf: str, *, name: str, cache: str,
         writer = csv.writer(tsv_file, delimiter="\t")
         writer.writerow(TSV_HEADER)
 
-        vg = _checked(_grouped(_reader(vepyr_vcf, vf, v_feat, cf, v_stats)), "vepyr_vcf", rank)
-        gg = _checked(_grouped(_reader(gt_vcf, gf, g_feat, cf, g_stats)), "gt_vcf", rank)
+        vg = _checked(_grouped(_reader(vepyr_vcf, vf, v_feat, v_allele, cf, v_stats)),
+                      "vepyr_vcf", rank)
+        gg = _checked(_grouped(_reader(gt_vcf, gf, g_feat, g_allele, cf, g_stats)),
+                      "gt_vcf", rank)
         V, G = next(vg, None), next(gg, None)
         while V and G:
             if rank(V[0]) < rank(G[0]):
@@ -113,18 +119,21 @@ def diff_files(vepyr_vcf: str, gt_vcf: str, *, name: str, cache: str,
                 (chrom_, pos_) = V[0]
                 for ra in set(V[1]) & set(G[1]):
                     vfeats, gfeats = V[1][ra], G[1][ra]
-                    for ft in set(vfeats) & set(gfeats):
+                    # keys are (allele, feature): one annotation per allele x transcript
+                    for key in set(vfeats) & set(gfeats):
+                        allele, ft = key
                         acc["aligned"] += 1
                         for fld in shared:
-                            a = vfeats[ft].get(fld, "")
-                            b = gfeats[ft].get(fld, "")
+                            a = vfeats[key].get(fld, "")
+                            b = gfeats[key].get(fld, "")
                             cat = classify(fld, combo_kwargs, a, b, **kw)
                             if cat is None:
                                 record_match(acc, fld)
                             else:
-                                record_mismatch(acc, fld, cat,
-                                                [f"{chrom_}:{pos_} {ra[0]}>{ra[1]} {ft}", a, b])
-                                writer.writerow([chrom_, pos_, ra[0], ra[1], ft, fld, a, b, str(cat)])
+                                loc = f"{chrom_}:{pos_} {ra[0]}>{ra[1]} {allele}|{ft}"
+                                record_mismatch(acc, fld, cat, [loc, a, b])
+                                writer.writerow([chrom_, pos_, ra[0], ra[1], allele, ft,
+                                                 fld, a, b, str(cat)])
                 only_v += len(set(V[1]) - set(G[1]))
                 only_g += len(set(G[1]) - set(V[1]))
                 V, G = next(vg, None), next(gg, None)

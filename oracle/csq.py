@@ -37,18 +37,27 @@ def chrom_ranks(path: str) -> dict[str, int]:
     return ranks
 
 
-def parse_record(line: str, fields: list[str], feat_i: int | None):
-    """-> ((chrom, pos, ref, alt), {feature: {field: value}}, n_malformed) or None.
+def parse_record(line: str, fields: list[str], feat_i: int | None,
+                 allele_i: int | None = None):
+    """-> ((chrom, pos, ref, alt), {(allele, feature): {field: value}}, n_malformed).
 
-    The Feature value is the join key across the two files. An entry too short to
-    carry that column (or a CSQ header with no Feature column at all) therefore has
-    NO join key: it is excluded from `feats` and counted as malformed instead.
+    None if the line carries no CSQ.
 
-    It deliberately gets no synthesised key. The previous positional fallback
-    (`str(len(feats))`) minted "0", "1", ... independently in each file, so two
-    unrelated keyless entries collided on the same key and were diffed against each
-    other -- reporting field-level `value_diff`s between two different transcripts.
-    Counting the entry is honest; guessing its identity is worse than dropping it.
+    The join key is **(Allele, Feature)**, not Feature alone. A multi-allelic record
+    (`REF=C ALT=T,CCGC`) packs one CSQ entry per *allele x transcript* pair into a
+    single VCF record, all sharing the same Feature. Keyed by Feature alone, the
+    later allele's entry overwrote the earlier one: half the annotations vanished,
+    and whichever survived was diffed against the other file's arbitrary survivor --
+    potentially a different allele entirely (an insertion's annotation compared
+    against an SNV's). `Allele` is the first CSQ field precisely to disambiguate this.
+
+    An entry that cannot produce a well-formed key -- missing EITHER component, or a
+    CSQ header lacking the column outright -- has no identity, so it is excluded from
+    the join and counted as malformed. It gets no synthesised key: the old positional
+    fallback (`str(len(feats))`) minted "0", "1", ... independently in each file, so
+    unrelated keyless entries collided and were diffed against each other. A repeated
+    key is ambiguous for the same reason: keep the first, count the surplus. Counting
+    is honest; guessing an entry's identity is worse than declining to match it.
     """
     cols = line.rstrip("\n").split("\t")
     if len(cols) < 8:
@@ -56,12 +65,16 @@ def parse_record(line: str, fields: list[str], feat_i: int | None):
     m = re.search(r"(?:^|;)CSQ=([^;\t]+)", cols[7])
     if not m:
         return None
-    feats: dict[str, dict[str, str]] = {}
+    feats: dict[tuple[str, str], dict[str, str]] = {}
     malformed = 0
     for entry in m.group(1).split(","):
         parts = entry.split("|")
-        if feat_i is None or feat_i >= len(parts):
+        if feat_i is None or feat_i >= len(parts) or allele_i is None or allele_i >= len(parts):
             malformed += 1
             continue
-        feats[parts[feat_i]] = {f: (parts[i] if i < len(parts) else "") for i, f in enumerate(fields)}
+        key = (parts[allele_i], parts[feat_i])
+        if key in feats:          # ambiguous -- never overwrite, never silently drop
+            malformed += 1
+            continue
+        feats[key] = {f: (parts[i] if i < len(parts) else "") for i, f in enumerate(fields)}
     return (norm_chrom(cols[0]), int(cols[1]), cols[3], cols[4]), feats, malformed
