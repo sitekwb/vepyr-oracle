@@ -56,21 +56,44 @@ def _checked(gen, stream: str, rank):
         yield pos_key, buf
 
 
+def _record_key(ref: str, alt: str) -> tuple[str, tuple[str, ...]]:
+    """Outer record key: (REF, sorted ALT alleles).
+
+    ALT is a comma-separated LIST whose order carries no meaning -- `T,CCGC` and
+    `CCGC,T` are the same variant. Keyed by the raw string, a tool that happened to
+    list the alleles in the other order failed to join at all and the whole record
+    fell into only_vepyr/only_gt, silently hollowing out the sample. Multi-ALT is
+    exactly where the two tools are most likely to disagree on representation, so
+    this must not be left to chance. Sorting makes listing order un-observable.
+
+    Only the OUTER key is normalised: the per-entry CSQ `Allele` still disambiguates
+    annotations *within* the record, and the raw ALT string is kept for output.
+    """
+    return ref, tuple(sorted(alt.split(",")))
+
+
 def _grouped(gen):
-    """Collapse consecutive records at the same (chrom,pos) into {(ref,alt): feats}."""
+    """Collapse consecutive records at the same (chrom,pos).
+
+    -> (chrom, pos), {record_key: (raw_alt, feats)}
+    """
     cur_key = None
     buf: dict = {}
     for key, feats in gen:
-        pos_key = (key[0], key[1])
-        if cur_key is None:
-            cur_key, buf = pos_key, {(key[2], key[3]): feats}
-        elif pos_key == cur_key:
-            buf[(key[2], key[3])] = feats
-        else:
+        chrom, pos, ref, alt = key
+        pos_key = (chrom, pos)
+        if cur_key is not None and pos_key != cur_key:
             yield cur_key, buf
-            cur_key, buf = pos_key, {(key[2], key[3]): feats}
+            buf = {}
+        cur_key = pos_key
+        buf[_record_key(ref, alt)] = (alt, feats)
     if cur_key is not None:
         yield cur_key, buf
+
+
+def _annotations(buf: dict) -> int:
+    """Total CSQ annotations across every record in a (chrom,pos) group."""
+    return sum(len(feats) for _raw_alt, feats in buf.values())
 
 
 def diff_files(vepyr_vcf: str, gt_vcf: str, *, name: str, cache: str,
@@ -112,13 +135,15 @@ def diff_files(vepyr_vcf: str, gt_vcf: str, *, name: str, cache: str,
         V, G = next(vg, None), next(gg, None)
         while V and G:
             if rank(V[0]) < rank(G[0]):
-                only_v += len(V[1]); V = next(vg, None)
+                only_v += _annotations(V[1]); V = next(vg, None)
             elif rank(G[0]) < rank(V[0]):
-                only_g += len(G[1]); G = next(gg, None)
+                only_g += _annotations(G[1]); G = next(gg, None)
             else:
                 (chrom_, pos_) = V[0]
-                for ra in set(V[1]) & set(G[1]):
-                    vfeats, gfeats = V[1][ra], G[1][ra]
+                for rk_ in set(V[1]) & set(G[1]):
+                    raw_alt, vfeats = V[1][rk_]
+                    _gt_raw_alt, gfeats = G[1][rk_]
+                    ref = rk_[0]
                     # keys are (allele, feature): one annotation per allele x transcript
                     for key in set(vfeats) & set(gfeats):
                         allele, ft = key
@@ -130,20 +155,35 @@ def diff_files(vepyr_vcf: str, gt_vcf: str, *, name: str, cache: str,
                             if cat is None:
                                 record_match(acc, fld)
                             else:
-                                loc = f"{chrom_}:{pos_} {ra[0]}>{ra[1]} {allele}|{ft}"
+                                loc = f"{chrom_}:{pos_} {ref}>{raw_alt} {allele}|{ft}"
                                 record_mismatch(acc, fld, cat, [loc, a, b])
-                                writer.writerow([chrom_, pos_, ra[0], ra[1], allele, ft,
+                                writer.writerow([chrom_, pos_, ref, raw_alt, allele, ft,
                                                  fld, a, b, str(cat)])
-                only_v += len(set(V[1]) - set(G[1]))
-                only_g += len(set(G[1]) - set(V[1]))
+                    # annotations present on one side only, INSIDE a joined record:
+                    # a transcript vepyr emits and VEP does not (or vice versa) was
+                    # previously uncounted entirely -- it hid inside a perfect score.
+                    only_v += len(set(vfeats) - set(gfeats))
+                    only_g += len(set(gfeats) - set(vfeats))
+                for rk_ in set(V[1]) - set(G[1]):
+                    only_v += len(V[1][rk_][1])
+                for rk_ in set(G[1]) - set(V[1]):
+                    only_g += len(G[1][rk_][1])
                 V, G = next(vg, None), next(gg, None)
         while V:
-            only_v += len(V[1]); V = next(vg, None)
+            only_v += _annotations(V[1]); V = next(vg, None)
         while G:
-            only_g += len(G[1]); G = next(gg, None)
+            only_g += _annotations(G[1]); G = next(gg, None)
+
+    # What fraction of all annotations seen did we actually get to compare?
+    # overall_pct only speaks for the annotations that JOINED; on its own it cannot
+    # distinguish "vepyr agrees with VEP" from "we compared almost nothing and the
+    # scraps agreed". Never raise on a low rate -- some non-overlap is legitimate --
+    # but the report must be able to say "we compared X% of annotations".
+    seen = acc["aligned"] + only_v + only_g
+    join_rate = round(acc["aligned"] / seen, 4) if seen else None
 
     return finalize(acc, name=name, cache=cache,
-                    only_vepyr=only_v, only_gt=only_g,
+                    only_vepyr=only_v, only_gt=only_g, join_rate=join_rate,
                     shared_fields=len(shared),
                     vepyr_only_fields=vepyr_only_fields,
                     gt_only_fields=gt_only_fields,

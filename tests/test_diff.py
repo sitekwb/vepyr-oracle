@@ -127,6 +127,65 @@ def test_multiallelic_alleles_do_not_overwrite_each_other(tmp_path):
     assert list(csv.DictReader(tsv.open(), delimiter="\t")) == []
 
 
+# --- Fix E: the OUTER record key is (REF, ALT). ALT is a comma-separated list ----
+# --- whose ORDER carries no meaning, so it must not decide whether two records ---
+# --- join. And the join rate must be honest about what was actually compared. ----
+
+def test_alt_listing_order_does_not_break_the_join(tmp_path):
+    tsv = tmp_path / "m.tsv"
+    # Same variant, same 4 annotations; vepyr lists ALT=CCGC,T and VEP lists T,CCGC.
+    s = diff_files(str(FIX / "vepyr_altorder.vcf"), str(FIX / "gt_altorder.vcf"),
+                   name="c", cache="k", combo_kwargs=COMBO_HGVS, tsv_path=str(tsv))
+
+    assert s["aligned_annotations"] == 4     # not 0 -- the record must still join
+    assert s["overall_pct"] == 100.0
+    assert s["only_vepyr"] == 0
+    assert s["only_gt"] == 0
+    assert s["join_rate"] == 1.0
+    assert list(csv.DictReader(tsv.open(), delimiter="\t")) == []
+
+
+def test_tsv_keeps_the_raw_alt_string_actually_present_in_the_file(tmp_path):
+    """Normalisation is for the join key only; the human must see the real ALT."""
+    tsv = tmp_path / "m.tsv"
+    gt = tmp_path / "gt.vcf"   # perturb one allele's SIFT so a row is emitted
+    gt.write_text((FIX / "gt_altorder.vcf").read_text()
+                  .replace("T|missense|ENST_A|deleterious", "T|missense|ENST_A|tolerated"))
+    diff_files(str(FIX / "vepyr_altorder.vcf"), str(gt),
+               name="c", cache="k", combo_kwargs=COMBO_HGVS, tsv_path=str(tsv))
+
+    rows = list(csv.DictReader(tsv.open(), delimiter="\t"))
+    assert len(rows) == 1
+    assert rows[0]["alt"] == "CCGC,T"        # vepyr's raw ALT, not a sorted tuple
+    assert rows[0]["allele"] == "T"          # the CSQ Allele still disambiguates
+    assert rows[0]["feature"] == "ENST_A"
+
+
+def test_join_rate_exposes_annotations_that_never_got_compared(tmp_path):
+    """vepyr emits ENST_A + ENST_B; the GT has only ENST_A.
+
+    Comparing just ENST_A and calling that 100% is the hollowed-out-sample failure:
+    an annotation nobody compared must not be able to hide inside a perfect score.
+    """
+    s = diff_files(str(FIX / "vepyr_partial.vcf"), str(FIX / "gt_partial.vcf"),
+                   name="c", cache="k", combo_kwargs=COMBO_HGVS,
+                   tsv_path=str(tmp_path / "m.tsv"))
+
+    assert s["aligned_annotations"] == 1
+    assert s["only_vepyr"] == 1              # ENST_B was NOT compared -- say so
+    assert s["only_gt"] == 0
+    assert s["join_rate"] == 0.5             # we compared half the annotations
+    assert s["overall_pct"] == 100.0         # ...of the half we did compare
+
+
+def test_join_rate_is_none_when_nothing_was_read(tmp_path):
+    s = diff_files(str(FIX / "vepyr_mini.vcf"), str(FIX / "gt_mini.vcf"),
+                   name="c", cache="k", combo_kwargs=COMBO_NO_HGVS,
+                   tsv_path=str(tmp_path / "m.tsv"), chrom="1")
+    assert s["aligned_annotations"] == 0
+    assert s["join_rate"] is None            # no denominator -> not "0%", not "100%"
+
+
 def test_clean_files_report_zero_malformed(tmp_path):
     s = diff_files(str(FIX / "vepyr_mini.vcf"), str(FIX / "gt_mini.vcf"),
                    name="c", cache="k", combo_kwargs=COMBO_NO_HGVS,
