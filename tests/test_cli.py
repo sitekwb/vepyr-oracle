@@ -1,0 +1,202 @@
+"""Smoke tests for the one-combo CLIs (bin/run_wgs.py, bin/validate.py).
+
+No vepyr, no cluster, no network. Two properties matter above all else:
+
+1. Both CLIs must stay importable/runnable (at least for --help and the resume /
+   no-gt short-circuits) on a machine with no vepyr installed -- that is what keeps
+   the whole oracle/ test suite laptop-runnable, and it is the exact property
+   `legacy/validate.py` broke by importing vepyr at module top.
+2. `oracle.matrix.resolve_kwargs()` must never let the plugin-cache placeholder
+   silently reach `vepyr.annotate()` -- see test_matrix.py for the exhaustive
+   sentinel-vs-string coverage; the checks here just re-confirm the CLI-facing
+   contract inline with the rest of this file's scenarios.
+
+Paths are made testable via `VEPYR_DATA` / `VEPYR_WORK` env var overrides, which
+both CLIs read instead of hardcoding `~/vepyr/data` and `~/vepyr/work` -- see
+bin/run_wgs.py and bin/validate.py.
+"""
+from __future__ import annotations
+
+import csv
+import json
+import os
+import subprocess
+import sys
+
+import pytest
+
+from oracle.matrix import MATRIX_HEADER, NEEDS_PLUGIN_CACHE, resolve_kwargs
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+RUN_WGS = os.path.join(ROOT, "bin", "run_wgs.py")
+VALIDATE = os.path.join(ROOT, "bin", "validate.py")
+FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
+
+
+def _write_matrix(path: str, **overrides) -> None:
+    row = {
+        "name": "hgvs_merged",
+        "cache_flavor": "merged",
+        "cache115": "115_GRCh38_merged",
+        "cache116": "116_GRCh38_merged",
+        "vepyr_kwargs": json.dumps({"everything": True, "hgvs": True}),
+        "vep_flags": "vep --everything --hgvs",
+        "gt115": "hgvs_merged.vcf",
+        "gt116": "hgvs_merged.vcf",
+    }
+    row.update(overrides)
+    with open(path, "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=MATRIX_HEADER, delimiter="\t")
+        w.writeheader()
+        w.writerow(row)
+
+
+def _run(args: list[str], env: dict[str, str]) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, *args], env=env,
+                          capture_output=True, text=True, timeout=30)
+
+
+# --- resolve_kwargs: the CLI-facing contract ---------------------------------
+#
+# The exhaustive sentinel-vs-round-tripped-string matrix lives in test_matrix.py;
+# these three confirm the shape bin/run_wgs.py actually depends on (it calls
+# resolve_kwargs() on kwargs freshly parsed from matrix.tsv JSON, i.e. the STRING
+# form, not the live sentinel object).
+
+def test_resolve_kwargs_raises_when_the_plugin_path_is_missing():
+    with pytest.raises(ValueError, match="plugin_cache_root is required"):
+        resolve_kwargs({"plugin_cache_root": NEEDS_PLUGIN_CACHE})
+    with pytest.raises(ValueError, match="plugin_cache_root is required"):
+        resolve_kwargs(json.loads(json.dumps({"plugin_cache_root": "@PLUGIN@"})))
+
+
+def test_resolve_kwargs_substitutes_when_given():
+    out = resolve_kwargs({"hgvs": True, "plugin_cache_root": NEEDS_PLUGIN_CACHE},
+                         plugin_cache_root="/data/plugin_cache")
+    assert out["plugin_cache_root"] == "/data/plugin_cache"
+    assert out["hgvs"] is True
+
+
+def test_resolve_kwargs_leaves_non_plugin_combos_untouched():
+    kw = {"everything": True, "hgvs": True, "pick": True}
+    assert resolve_kwargs(kw) == kw
+    assert resolve_kwargs(kw, plugin_cache_root="/anything") == kw
+
+
+# --- lazy import: pins the property the whole suite depends on --------------
+#
+# This environment (the .venv these tests run under) has no vepyr installed --
+# confirmed separately, and load-bearing here: if `import vepyr` were ever moved
+# to module top in either CLI, THESE tests would fail with ModuleNotFoundError
+# surfacing on stderr and a non-zero returncode, instead of a clean --help exit.
+# That is what makes this a pin and not just a smoke check.
+
+@pytest.mark.parametrize("script", [RUN_WGS, VALIDATE])
+def test_help_does_not_import_vepyr(script):
+    result = _run([script, "--help"], env=os.environ.copy())
+    assert result.returncode == 0, result.stderr
+    assert "ModuleNotFoundError" not in result.stderr
+    assert "No module named 'vepyr'" not in result.stderr
+    assert "usage:" in result.stdout.lower()
+
+
+def test_vepyr_is_in_fact_not_installed_here():
+    """If this ever fails (vepyr got installed in the test venv), the pin above
+    stops meaning anything -- it would pass even with `import vepyr` at module
+    top. Fails loudly instead of silently testing nothing."""
+    result = subprocess.run([sys.executable, "-c", "import vepyr"],
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode != 0
+    assert "ModuleNotFoundError" in result.stderr
+
+
+# --- resume: both CLIs must be no-ops on an existing, non-empty output ------
+
+def test_run_wgs_resume_skips_without_importing_vepyr(tmp_path):
+    out = tmp_path / "out.vcf"
+    out.write_text("not a real vcf, just needs to be non-empty\n")
+    env = {**os.environ, "VEPYR_DATA": str(tmp_path / "data"),
+          "VEPYR_WORK": str(tmp_path / "work")}
+    result = _run([RUN_WGS, "--combo", "hgvs_merged", "--version", "115",
+                  "--out", str(out)], env=env)
+    assert result.returncode == 0, result.stderr
+    assert "already exists" in result.stdout
+    assert "ModuleNotFoundError" not in result.stderr
+
+
+def test_validate_resume_skips_an_existing_summary(tmp_path):
+    outdir = tmp_path / "out"
+    outdir.mkdir()
+    (outdir / "summary_hgvs_merged.json").write_text('{"status": "ok"}')
+    env = {**os.environ, "VEPYR_DATA": str(tmp_path / "data"),
+          "VEPYR_WORK": str(tmp_path / "work")}
+    result = _run([VALIDATE, "--combo", "hgvs_merged", "--version", "115",
+                  "--vepyr", "/nonexistent.vcf", "--outdir", str(outdir)], env=env)
+    assert result.returncode == 0, result.stderr
+    assert "already exists" in result.stdout
+
+
+# --- validate.py: no_gt must exit 0, never crash the array ------------------
+
+def test_validate_writes_no_gt_summary_and_exits_0_when_gt_is_absent(tmp_path):
+    data_dir = tmp_path / "data"
+    work_dir = tmp_path / "work"
+    (data_dir / "ground_truth_vep").mkdir(parents=True)   # dir exists, file does not
+    work_dir.mkdir()
+    _write_matrix(str(work_dir / "matrix.tsv"))
+    outdir = tmp_path / "out"
+
+    env = {**os.environ, "VEPYR_DATA": str(data_dir), "VEPYR_WORK": str(work_dir)}
+    result = _run([VALIDATE, "--combo", "hgvs_merged", "--version", "115",
+                  "--vepyr", str(tmp_path / "vepyr_out.vcf"),
+                  "--outdir", str(outdir)], env=env)
+
+    assert result.returncode == 0, result.stderr
+    summary_file = outdir / "summary_hgvs_merged.json"
+    assert summary_file.exists()
+    summary = json.loads(summary_file.read_text())
+    assert summary == {"name": "hgvs_merged", "cache": "115_GRCh38_merged", "status": "no_gt"}
+    # no mismatches TSV should have been produced -- diff_files() was never called
+    assert not (outdir / "mismatches").exists()
+
+
+def test_validate_runs_the_real_diff_when_gt_is_present(tmp_path):
+    """End-to-end (no vepyr needed: diff only ever reads two already-annotated
+    VCFs) -- confirms the CLI wires combo_kwargs / cache / paths correctly
+    against oracle.diff.diff_files(), using the same fixtures test_diff.py uses."""
+    data_dir = tmp_path / "data"
+    work_dir = tmp_path / "work"
+    gt_dir = data_dir / "ground_truth_vep"
+    gt_dir.mkdir(parents=True)
+    work_dir.mkdir()
+    (gt_dir / "hgvs_merged.vcf").write_text(
+        (open(os.path.join(FIXTURES, "gt_mini.vcf")).read()))
+    _write_matrix(str(work_dir / "matrix.tsv"))
+    outdir = tmp_path / "out"
+
+    env = {**os.environ, "VEPYR_DATA": str(data_dir), "VEPYR_WORK": str(work_dir)}
+    result = _run([VALIDATE, "--combo", "hgvs_merged", "--version", "115",
+                  "--vepyr", os.path.join(FIXTURES, "vepyr_mini.vcf"),
+                  "--outdir", str(outdir)], env=env)
+
+    assert result.returncode == 0, result.stderr
+    summary = json.loads((outdir / "summary_hgvs_merged.json").read_text())
+    assert summary["status"] == "ok"
+    assert "overall_pct" in summary and "join_rate" in summary
+    assert (outdir / "mismatches" / "hgvs_merged.tsv").exists()
+    # the printed headline must carry the coverage signals alongside overall_pct
+    assert "overall_pct=" in result.stdout and "join_rate=" in result.stdout
+
+
+def test_validate_unknown_combo_exits_nonzero_with_a_clear_message(tmp_path):
+    data_dir = tmp_path / "data"
+    work_dir = tmp_path / "work"
+    (data_dir / "ground_truth_vep").mkdir(parents=True)
+    work_dir.mkdir()
+    _write_matrix(str(work_dir / "matrix.tsv"))
+
+    env = {**os.environ, "VEPYR_DATA": str(data_dir), "VEPYR_WORK": str(work_dir)}
+    result = _run([VALIDATE, "--combo", "does_not_exist", "--version", "115",
+                  "--vepyr", "/nonexistent.vcf", "--outdir", str(tmp_path / "out")], env=env)
+    assert result.returncode != 0
+    assert "does_not_exist" in result.stderr
