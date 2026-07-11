@@ -87,3 +87,25 @@ def test_underscored_digits_are_not_silently_parsed_as_ten():
 def test_infinity_and_nan_are_not_numbers():
     assert classify("CADD_PHRED", HGVS_ON, "inf", "1e400") == Category.VALUE_DIFF
     assert classify("CADD_PHRED", HGVS_ON, "nan", "0") == Category.VALUE_DIFF
+
+
+# --- MINOR 10: VEP writes "-" for the null case in Amino_acids/Codons/ -----------
+# --- Protein_position. If vepyr writes "" there, every such annotation minted a ---
+# --- VEP_ONLY -- our HIGHEST-priority category -- burying the real gaps in noise. --
+
+def test_vep_dash_against_vepyr_empty_is_not_a_gap():
+    assert classify("Amino_acids", HGVS_ON, "", "-") is None
+
+
+def test_vepyr_dash_against_vep_empty_is_not_a_drift():
+    assert classify("Codons", HGVS_ON, "-", "") is None
+
+
+def test_dot_is_also_an_empty_sentinel():
+    assert classify("Protein_position", HGVS_ON, ".", "") is None
+    assert classify("Protein_position", HGVS_ON, "-", ".") is None
+
+
+def test_a_real_gap_is_still_a_gap_after_sentinel_normalisation():
+    assert classify("Amino_acids", HGVS_ON, "-", "M/T") == Category.VEP_ONLY
+    assert classify("Amino_acids", HGVS_ON, "M/T", "-") == Category.VEPYR_ONLY

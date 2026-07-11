@@ -83,6 +83,18 @@ def _as_float(v: str) -> float | None:
         return None
 
 
+#: All the ways the two tools spell "this field has no value here". VEP writes "-"
+#: for the null case in Amino_acids / Codons / Protein_position (and "." is the VCF
+#: null); vepyr writes "". Left un-normalised, every such annotation minted a
+#: VEP_ONLY -- our HIGHEST-priority category, the one that means "vepyr GAP" -- and
+#: buried the real gaps under thousands of spelling differences.
+EMPTY_SENTINELS = frozenset({"", "-", "."})
+
+
+def _norm_empty(v: str) -> str:
+    return "" if v in EMPTY_SENTINELS else v
+
+
 def _same_set_diff_order(a: str, b: str) -> bool:
     for sep in _MULTI_SEPS:
         if sep in a or sep in b:
@@ -95,7 +107,13 @@ def _same_set_diff_order(a: str, b: str) -> bool:
 def classify(field: str, combo_kwargs: dict, vepyr_val: str, vep_val: str,
              rel_tol: float = DEFAULT_REL_TOL,
              abs_tol: float = DEFAULT_ABS_TOL) -> Category | None:
-    """None when the values agree (not a mismatch)."""
+    """None when the values agree (not a mismatch).
+
+    Both values are first normalised through EMPTY_SENTINELS, so a field VEP spells
+    "-" and vepyr spells "" is a MATCH, not a fabricated gap. (The TSV still records
+    the raw strings -- normalisation decides the category, never what the human sees.)
+    """
+    vepyr_val, vep_val = _norm_empty(vepyr_val), _norm_empty(vep_val)
     if vepyr_val == vep_val:
         return None
     if is_flag_expected(field, combo_kwargs, vepyr_val, vep_val):
