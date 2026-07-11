@@ -1,0 +1,13 @@
+[project]
+name = "vepyr-oracle"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["matplotlib>=3.8", "numpy>=1.26"]
+
+[project.optional-dependencies]
+cluster = ["pysam>=0.22"]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
