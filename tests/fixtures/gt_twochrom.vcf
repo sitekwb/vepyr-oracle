@@ -1,0 +1,9 @@
+##fileformat=VCFv4.2
+##contig=<ID=chr21>
+##contig=<ID=chr22>
+##INFO=<ID=CSQ,Number=.,Type=String,Description="Format: Allele|Consequence|Feature|SIFT|HGVSc">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chr21	100	.	A	G	.	.	CSQ=G|missense|ENST21A|tolerated|c.1A>G,G|intron|ENST21B||c.2A>G
+chr21	200	.	G	A	.	.	CSQ=A|missense|ENST21X|deleterious|c.5G>A
+chr22	100	.	A	G	.	.	CSQ=G|missense|ENST22A|deleterious|c.1A>G,G|missense|ENST22Z|deleterious|c.1A>G
+chr22	200	.	C	T	.	.	CSQ=T|missense|ENST22B|tolerated|c.9C>T

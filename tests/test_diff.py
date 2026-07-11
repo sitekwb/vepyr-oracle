@@ -1,6 +1,7 @@
 import csv, pathlib
 import pytest
 from oracle.diff import diff_files
+from oracle.summary import merge
 
 FIX = pathlib.Path(__file__).parent / "fixtures"
 COMBO_NO_HGVS = {"everything": True}                 # -> HGVSc diffs are flag_expected
@@ -17,6 +18,8 @@ def test_diff_classifies_and_writes_tsv(tmp_path):
     # HGVSc: vepyr computed it, GT empty, combo has no hgvs -> flag_expected (x2)
     assert s["per_field"]["HGVSc"]["by_category"] == {"flag_expected": 2}
     assert s["per_field"]["Feature"]["pct"] == 100.0
+    # 2 annotations x 5 shared fields = 10 comparisons; 1 SIFT + 2 HGVSc mismatch
+    assert s["overall_pct"] == 70.0
 
     rows = list(csv.DictReader(tsv.open(), delimiter="\t"))
     assert len(rows) == 3                                  # 1 SIFT + 2 HGVSc
@@ -29,6 +32,19 @@ def test_chrom_filter_restricts_the_diff(tmp_path):
                    name="c", cache="k", combo_kwargs=COMBO_NO_HGVS,
                    tsv_path=str(tmp_path / "m.tsv"), chrom="1")
     assert s["aligned_annotations"] == 0
+
+
+@pytest.mark.parametrize("chrom", ["22", "chr22"])
+def test_chrom_filter_KEEPS_the_requested_chromosome(tmp_path, chrom):
+    """The positive counterpart to the test above -- which also passes if the filter
+    drops EVERYTHING. Chrom filtering is how every WGS shard is produced: a filter
+    that quietly matched nothing would make each shard a truthful-looking 0/0 and the
+    whole-genome merge a sum of nothings. Both spellings must select the contig."""
+    s = diff_files(str(FIX / "vepyr_mini.vcf"), str(FIX / "gt_mini.vcf"),
+                   name="c", cache="k", combo_kwargs=COMBO_NO_HGVS,
+                   tsv_path=str(tmp_path / "m.tsv"), chrom=chrom)
+    assert s["aligned_annotations"] == 2
+    assert s["chrom"] == chrom
 
 
 # --- Fix A: the merge-join must never silently consume an unsorted stream -------
@@ -228,3 +244,44 @@ def test_contig_missing_from_the_gt_contig_header_raises(tmp_path):
     msg = str(ei.value)
     assert "'M'" in msg
     assert "##contig" in msg
+
+
+# --- THE INVARIANT THE WHOLE SHARDING STRATEGY RESTS ON --------------------------
+# --- Every published number is produced as merge(per-chromosome diffs). If that ---
+# --- is not equal to a single-pass diff of the whole file, the sharding itself ----
+# --- is the bug -- and nothing asserted it. --------------------------------------
+
+#: per-shard keys that merge() deliberately folds into plural forms
+_FOLDED = {"chrom", "mismatches_tsv", "chroms", "mismatches_tsvs"}
+
+
+def test_merging_per_chromosome_shards_equals_diffing_the_whole_file(tmp_path):
+    whole = diff_files(str(FIX / "vepyr_twochrom.vcf"), str(FIX / "gt_twochrom.vcf"),
+                       name="c", cache="k", combo_kwargs=COMBO_HGVS,
+                       tsv_path=str(tmp_path / "whole.tsv"))
+    shards = [
+        diff_files(str(FIX / "vepyr_twochrom.vcf"), str(FIX / "gt_twochrom.vcf"),
+                   name="c", cache="k", combo_kwargs=COMBO_HGVS,
+                   tsv_path=str(tmp_path / f"{c}.tsv"), chrom=c)
+        for c in ("21", "22")
+    ]
+    merged = merge(shards, expected_chroms={"21", "22"})
+
+    # the fixture is not trivial: real mismatches, and unjoined annotations BOTH ways
+    assert whole["aligned_annotations"] == 4
+    assert (whole["only_vepyr"], whole["only_gt"]) == (1, 2)
+    assert whole["overall_pct"] == 90.0
+    assert whole["join_rate"] == round(4 / 7, 4)
+
+    for k in set(whole) - _FOLDED:
+        assert merged[k] == whole[k], f"sharding changed {k!r}: {merged[k]} != {whole[k]}"
+    assert merged["chroms"] == ["21", "22"]
+
+
+def test_a_shard_set_missing_a_chromosome_cannot_masquerade_as_the_whole_file(tmp_path):
+    """The other half of the invariant: a HOLE must not merge into a genome number."""
+    only_21 = diff_files(str(FIX / "vepyr_twochrom.vcf"), str(FIX / "gt_twochrom.vcf"),
+                         name="c", cache="k", combo_kwargs=COMBO_HGVS,
+                         tsv_path=str(tmp_path / "21.tsv"), chrom="21")
+    with pytest.raises(ValueError, match="22"):
+        merge([only_21], expected_chroms={"21", "22"})
