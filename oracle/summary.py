@@ -59,10 +59,34 @@ def finalize(acc: dict, name: str, cache: str, **extra: Any) -> dict:
     }
 
 
+def _check_mergeable(summaries: list[dict]) -> None:
+    """Shards must describe the SAME combo over the SAME fields, else the summed
+    counters are silently wrong. Fail loudly rather than narrow to shard 0."""
+    base = summaries[0]
+    base_fields = set(base["per_field"])
+    for i, s in enumerate(summaries[1:], start=1):
+        if s["name"] != base["name"]:
+            raise ValueError(
+                f"merge(): shard {i} is a different combo "
+                f"({s['name']!r} != {base['name']!r} from shard 0); "
+                f"refusing to merge shards from different combo runs"
+            )
+        fields = set(s["per_field"])
+        if fields != base_fields:
+            missing = sorted(base_fields - fields)
+            extra = sorted(fields - base_fields)
+            raise ValueError(
+                f"merge(): shard {i} ({s['name']!r}) has a different field set "
+                f"than shard 0 -- missing={missing} extra={extra}; "
+                f"refusing to merge (summed counters would be silently wrong)"
+            )
+
+
 def merge(summaries: list[dict]) -> dict:
     """Merge per-shard summaries of the SAME combo into one."""
     if not summaries:
         raise ValueError("merge() needs at least one summary")
+    _check_mergeable(summaries)
     base = summaries[0]
     fields = list(base["per_field"])
     per_field = {
