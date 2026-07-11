@@ -49,3 +49,10 @@ def test_merge_rejects_shards_from_different_combos():
     b = new_accumulator(["SIFT"]); record_match(b, "SIFT")
     with pytest.raises(ValueError, match="combo"):
         merge([finalize(a, "combo_x", "k"), finalize(b, "combo_y", "k")])
+
+def test_merge_rejects_shards_from_different_caches():
+    a = new_accumulator(["SIFT"]); record_match(a, "SIFT")
+    b = new_accumulator(["SIFT"]); record_match(b, "SIFT")
+    with pytest.raises(ValueError, match="cache"):
+        merge([finalize(a, "hgvs_merged", "115_GRCh38_merged"),
+               finalize(b, "hgvs_merged", "116_GRCh38_merged")])

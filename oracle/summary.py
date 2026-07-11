@@ -71,6 +71,13 @@ def _check_mergeable(summaries: list[dict]) -> None:
                 f"({s['name']!r} != {base['name']!r} from shard 0); "
                 f"refusing to merge shards from different combo runs"
             )
+        if s["cache"] != base["cache"]:
+            raise ValueError(
+                f"merge(): shard {i} ({s['name']!r}) is from a different cache "
+                f"({s['cache']!r} != {base['cache']!r} from shard 0); "
+                f"refusing to merge -- the result would sum counters across caches "
+                f"and be stamped with only shard 0's cache"
+            )
         fields = set(s["per_field"])
         if fields != base_fields:
             missing = sorted(base_fields - fields)
