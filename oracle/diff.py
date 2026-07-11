@@ -112,8 +112,41 @@ def diff_files(vepyr_vcf: str, gt_vcf: str, *, name: str, cache: str,
     v_feat, v_allele = v_idx.get("Feature"), v_idx.get("Allele")
     g_feat, g_allele = g_idx.get("Feature"), g_idx.get("Allele")
 
-    ranks = chrom_ranks(gt_vcf) or chrom_ranks(vepyr_vcf)
-    rank = lambda pk: (ranks.get(pk[0], 9999), pk[1])
+    ranks = chrom_ranks(gt_vcf)
+    rank_src = gt_vcf
+    if not ranks:
+        ranks, rank_src = chrom_ranks(vepyr_vcf), vepyr_vcf
+
+    def rank(pk: tuple[str, int]) -> tuple[int, str, int]:
+        """Merge-join order key: (contig_rank, contig_name, pos).
+
+        An unranked contig gets NO default. The old `ranks.get(c, 9999)` gave every
+        contig missing from the ##contig header the SAME rank, and the merge-join's
+        equal-branch fires on rank equality without ever comparing contig NAMES --
+        so two DIFFERENT unranked contigs (a vepyr-only chrUn_A and a GT-only
+        chrUn_B) became "the same contig", were joined, and minted fabricated
+        value_diffs at a join_rate of 1.0. The quieter variant: norm_chrom("chrM")
+        is "M" but a header saying `##contig=<ID=MT>` ranks "MT", so "M" sorted last
+        behind the sentinel, tripped no guard, and the ENTIRE MITOCHONDRION vanished
+        into only_vepyr/only_gt while the report read 100%.
+
+        The contig NAME is part of the key so that even a rank collision can never
+        make two distinct contigs compare equal.
+        """
+        c, pos = pk
+        if c not in ranks:
+            raise ValueError(
+                f"contig {c!r} has no rank: it is absent from the ##contig header of "
+                f"{rank_src}. The merge-join orders BOTH streams by that header, so "
+                f"an unranked contig has no defined position in the stream and cannot "
+                f"be joined or ordered. Refusing to guess: a default rank makes every "
+                f"unranked contig compare EQUAL to every other (joining chrUn_A "
+                f"against chrUn_B and fabricating value_diffs), and hides a naming "
+                f"mismatch such as chrM-vs-MT by silently sweeping the whole contig "
+                f"into only_vepyr/only_gt. Add {c!r} to the ground-truth VCF's "
+                f"##contig header, or restrict the run with chrom=."
+            )
+        return ranks[c], c, pos
 
     cf = norm_chrom(chrom) if chrom else None
     acc = new_accumulator(shared)

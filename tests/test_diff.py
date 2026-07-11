@@ -192,3 +192,39 @@ def test_clean_files_report_zero_malformed(tmp_path):
                    tsv_path=str(tmp_path / "m.tsv"))
     assert s["malformed_vepyr"] == 0
     assert s["malformed_gt"] == 0
+
+
+# --- CRITICAL 4: an unknown contig must NOT default to a shared sentinel rank. ---
+# --- Every contig absent from the ##contig header used to rank 9999, and the -----
+# --- merge-join's equal-branch fires on RANK equality without ever comparing -----
+# --- contig NAMES -- so two DIFFERENT unranked contigs became "the same contig". --
+
+def test_two_unranked_contigs_raise_instead_of_being_joined_together(tmp_path):
+    """vepyr has chrUn_A, the GT has chrUn_B, the GT header lists neither.
+
+    Before: both ranked 9999, the equal-branch fired, and chrUn_A's annotations were
+    diffed against chrUn_B's -- aligned_annotations=3, join_rate=1.0, and four
+    FABRICATED value_diff rows in the TSV. Nothing warned.
+    """
+    with pytest.raises(ValueError) as ei:
+        diff_files(str(FIX / "vepyr_unranked.vcf"), str(FIX / "gt_unranked.vcf"),
+                   name="c", cache="k", combo_kwargs=COMBO_HGVS,
+                   tsv_path=str(tmp_path / "m.tsv"))
+    msg = str(ei.value)
+    assert "Un_A" in msg          # names the offending contig
+    assert "##contig" in msg      # ...and the header it must appear in
+
+
+def test_contig_missing_from_the_gt_contig_header_raises(tmp_path):
+    """The quiet variant: norm_chrom('chrM') == 'M' but the GT header says 'MT'.
+
+    Before: 'M' ranked 9999, sorted last, the sort guard passed -- and the ENTIRE
+    MITOCHONDRION dropped into only_vepyr/only_gt while overall_pct read 100.0.
+    """
+    with pytest.raises(ValueError) as ei:
+        diff_files(str(FIX / "vepyr_mito.vcf"), str(FIX / "gt_mito.vcf"),
+                   name="c", cache="k", combo_kwargs=COMBO_HGVS,
+                   tsv_path=str(tmp_path / "m.tsv"))
+    msg = str(ei.value)
+    assert "'M'" in msg
+    assert "##contig" in msg
