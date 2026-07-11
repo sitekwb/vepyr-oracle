@@ -56,3 +56,27 @@ def test_unsorted_error_names_the_stream_and_both_loci(tmp_path):
     assert "22:100" in msg             # the offending locus
     assert "22:200" in msg             # the locus it came after
     assert "##contig" in msg           # where contig rank comes from -> diagnosable
+
+
+# --- Fix B: fields present on only one side are dropped from the diff, so the ---
+# --- summary must at least SAY so (else a never-implemented field reads 100%) ---
+
+def test_summary_records_fields_present_on_only_one_side(tmp_path):
+    s = diff_files(str(FIX / "vepyr_extra_field.vcf"), str(FIX / "gt_extra_field.vcf"),
+                   name="c", cache="k", combo_kwargs=COMBO_NO_HGVS,
+                   tsv_path=str(tmp_path / "m.tsv"))
+
+    assert s["vepyr_only_fields"] == ["VEPYR_ONLY"]
+    assert s["gt_only_fields"] == ["GT_ONLY"]
+    # the dropped fields really are excluded from the comparison itself
+    assert s["shared_fields"] == 4
+    assert "VEPYR_ONLY" not in s["per_field"]
+    assert "GT_ONLY" not in s["per_field"]
+
+
+def test_no_field_asymmetry_reports_empty_lists(tmp_path):
+    s = diff_files(str(FIX / "vepyr_mini.vcf"), str(FIX / "gt_mini.vcf"),
+                   name="c", cache="k", combo_kwargs=COMBO_NO_HGVS,
+                   tsv_path=str(tmp_path / "m.tsv"))
+    assert s["vepyr_only_fields"] == []
+    assert s["gt_only_fields"] == []

@@ -70,6 +70,11 @@ def diff_files(vepyr_vcf: str, gt_vcf: str, *, name: str, cache: str,
     vf = csq_format_fields(vepyr_vcf)
     gf = csq_format_fields(gt_vcf)
     shared = [f for f in vf if f in gf]
+    # A field only one side emits cannot be value-compared, so it is dropped from
+    # the diff -- but the drop must not be silent: a field vepyr never implements
+    # would otherwise leave a report that is 100% green on the fields it does emit.
+    vepyr_only_fields = sorted(set(vf) - set(gf))
+    gt_only_fields = sorted(set(gf) - set(vf))
     v_feat = {f: i for i, f in enumerate(vf)}.get("Feature")
     g_feat = {f: i for i, f in enumerate(gf)}.get("Feature")
 
@@ -120,5 +125,8 @@ def diff_files(vepyr_vcf: str, gt_vcf: str, *, name: str, cache: str,
 
     return finalize(acc, name=name, cache=cache,
                     only_vepyr=only_v, only_gt=only_g,
-                    shared_fields=len(shared), mismatches_tsv=tsv_path,
+                    shared_fields=len(shared),
+                    vepyr_only_fields=vepyr_only_fields,
+                    gt_only_fields=gt_only_fields,
+                    mismatches_tsv=tsv_path,
                     chrom=chrom or "all")
