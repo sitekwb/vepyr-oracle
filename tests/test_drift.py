@@ -27,3 +27,23 @@ def test_same_multivalue_set_different_order_is_cosmetic():
 
 def test_identical_values_are_not_classified():
     assert classify("Feature", HGVS_ON, "ENST1", "ENST1") is None
+
+
+# --- IMPORTANT 5: FLAG_EXPECTED absolved REAL bugs. The premise is strictly -------
+# --- ONE-DIRECTIONAL (vepyr populates a field the combo's flags never asked VEP ---
+# --- for, so VEP leaves it empty). The guard was not: it fired on the FIELD alone, -
+# --- before any direction check, so a vepyr REGRESSION and a WRONG value were both -
+# --- filed "not a bug" and erased from the headline true %. ------------------------
+
+def test_flag_expected_requires_the_expected_shape_vepyr_populated_vep_empty():
+    assert classify("HGVSc", HGVS_OFF, "c.1A>G", "") == Category.FLAG_EXPECTED
+
+
+def test_vepyr_empty_where_vep_populated_is_a_gap_not_flag_expected():
+    """vepyr stopped emitting HGVSc. That is a vepyr GAP, whatever the flags say."""
+    assert classify("HGVSc", HGVS_OFF, "", "c.1A>G") == Category.VEP_ONLY
+
+
+def test_both_populated_and_different_is_a_value_diff_not_flag_expected():
+    """vepyr emits a WRONG HGVSc. The flag cannot make a wrong value not-a-bug."""
+    assert classify("HGVSc", HGVS_OFF, "c.1A>G", "c.999T>C") == Category.VALUE_DIFF

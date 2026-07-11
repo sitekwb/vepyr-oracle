@@ -26,9 +26,25 @@ _MULTI_SEPS = ("&", ",")
 DEFAULT_EPS = 1e-4
 
 
-def is_flag_expected(field: str, combo_kwargs: dict) -> bool:
+def is_flag_expected(field: str, combo_kwargs: dict, vepyr_val: str, vep_val: str) -> bool:
+    """True only for the ONE shape the flag premise actually explains.
+
+    The premise is strictly one-directional: the combo's flags never asked VEP for
+    this field, so VEP leaves it EMPTY while vepyr computes it anyway. Anything else
+    is a genuine finding, and the guard used to fire on the FIELD ALONE -- before any
+    direction or emptiness check -- so on a combo without `hgvs`:
+
+        vepyr=''       VEP='c.1A>G'    -> flag_expected   (a real vepyr GAP)
+        vepyr='c.1A>G' VEP='c.999T>C'  -> flag_expected   (a WRONG HGVS)
+
+    were both filed "not a bug" and erased from the headline true %. A vepyr
+    regression that stopped emitting HGVSc, or one that emitted the wrong HGVSc,
+    was invisible.
+    """
     req = FIELD_REQUIRES_FLAG.get(field)
-    return req is not None and not combo_kwargs.get(req)
+    if req is None or combo_kwargs.get(req):
+        return False
+    return bool(vepyr_val) and not vep_val
 
 
 def _as_float(v: str) -> float | None:
@@ -52,7 +68,7 @@ def classify(field: str, combo_kwargs: dict, vepyr_val: str, vep_val: str,
     """None when the values agree (not a mismatch)."""
     if vepyr_val == vep_val:
         return None
-    if is_flag_expected(field, combo_kwargs):
+    if is_flag_expected(field, combo_kwargs, vepyr_val, vep_val):
         return Category.FLAG_EXPECTED
     if not vepyr_val and vep_val:
         return Category.VEP_ONLY
