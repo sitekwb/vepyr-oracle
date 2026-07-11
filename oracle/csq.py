@@ -38,7 +38,18 @@ def chrom_ranks(path: str) -> dict[str, int]:
 
 
 def parse_record(line: str, fields: list[str], feat_i: int | None):
-    """-> ((chrom, pos, ref, alt), {feature: {field: value}}) or None."""
+    """-> ((chrom, pos, ref, alt), {feature: {field: value}}, n_malformed) or None.
+
+    The Feature value is the join key across the two files. An entry too short to
+    carry that column (or a CSQ header with no Feature column at all) therefore has
+    NO join key: it is excluded from `feats` and counted as malformed instead.
+
+    It deliberately gets no synthesised key. The previous positional fallback
+    (`str(len(feats))`) minted "0", "1", ... independently in each file, so two
+    unrelated keyless entries collided on the same key and were diffed against each
+    other -- reporting field-level `value_diff`s between two different transcripts.
+    Counting the entry is honest; guessing its identity is worse than dropping it.
+    """
     cols = line.rstrip("\n").split("\t")
     if len(cols) < 8:
         return None
@@ -46,8 +57,11 @@ def parse_record(line: str, fields: list[str], feat_i: int | None):
     if not m:
         return None
     feats: dict[str, dict[str, str]] = {}
+    malformed = 0
     for entry in m.group(1).split(","):
         parts = entry.split("|")
-        feat = parts[feat_i] if feat_i is not None and feat_i < len(parts) else str(len(feats))
-        feats[feat] = {f: (parts[i] if i < len(parts) else "") for i, f in enumerate(fields)}
-    return (norm_chrom(cols[0]), int(cols[1]), cols[3], cols[4]), feats
+        if feat_i is None or feat_i >= len(parts):
+            malformed += 1
+            continue
+        feats[parts[feat_i]] = {f: (parts[i] if i < len(parts) else "") for i, f in enumerate(fields)}
+    return (norm_chrom(cols[0]), int(cols[1]), cols[3], cols[4]), feats, malformed

@@ -9,14 +9,21 @@ TSV_HEADER = ["chrom", "pos", "ref", "alt", "feature", "field",
               "vepyr_val", "vep_val", "category"]
 
 
-def _reader(path, fields, feat_i, chrom=None):
+def _reader(path, fields, feat_i, chrom=None, stats=None):
+    """Yield (key, feats); tally keyless (malformed) CSQ entries into `stats`."""
     with open_maybe_gzip(path) as f:
         for line in f:
             if line.startswith("#"):
                 continue
             rec = parse_record(line, fields, feat_i)
-            if rec and (chrom is None or rec[0][0] == chrom):
-                yield rec
+            if rec is None:
+                continue
+            key, feats, malformed = rec
+            if chrom is not None and key[0] != chrom:
+                continue
+            if stats is not None:
+                stats["malformed"] += malformed
+            yield key, feats
 
 
 def _checked(gen, stream: str, rank):
@@ -84,6 +91,9 @@ def diff_files(vepyr_vcf: str, gt_vcf: str, *, name: str, cache: str,
     cf = norm_chrom(chrom) if chrom else None
     acc = new_accumulator(shared)
     only_v = only_g = 0
+    # keyless CSQ entries: excluded from the join (they cannot be identified),
+    # but counted so their existence is never invisible in the report.
+    v_stats, g_stats = {"malformed": 0}, {"malformed": 0}
 
     kw = {} if eps is None else {"eps": eps}
 
@@ -91,8 +101,8 @@ def diff_files(vepyr_vcf: str, gt_vcf: str, *, name: str, cache: str,
         writer = csv.writer(tsv_file, delimiter="\t")
         writer.writerow(TSV_HEADER)
 
-        vg = _checked(_grouped(_reader(vepyr_vcf, vf, v_feat, cf)), "vepyr_vcf", rank)
-        gg = _checked(_grouped(_reader(gt_vcf, gf, g_feat, cf)), "gt_vcf", rank)
+        vg = _checked(_grouped(_reader(vepyr_vcf, vf, v_feat, cf, v_stats)), "vepyr_vcf", rank)
+        gg = _checked(_grouped(_reader(gt_vcf, gf, g_feat, cf, g_stats)), "gt_vcf", rank)
         V, G = next(vg, None), next(gg, None)
         while V and G:
             if rank(V[0]) < rank(G[0]):
@@ -128,5 +138,7 @@ def diff_files(vepyr_vcf: str, gt_vcf: str, *, name: str, cache: str,
                     shared_fields=len(shared),
                     vepyr_only_fields=vepyr_only_fields,
                     gt_only_fields=gt_only_fields,
+                    malformed_vepyr=v_stats["malformed"],
+                    malformed_gt=g_stats["malformed"],
                     mismatches_tsv=tsv_path,
                     chrom=chrom or "all")

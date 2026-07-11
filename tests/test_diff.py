@@ -3,7 +3,8 @@ import pytest
 from oracle.diff import diff_files
 
 FIX = pathlib.Path(__file__).parent / "fixtures"
-COMBO_NO_HGVS = {"everything": True}   # -> HGVSc mismatches are flag_expected
+COMBO_NO_HGVS = {"everything": True}                 # -> HGVSc diffs are flag_expected
+COMBO_HGVS = {"everything": True, "hgvs": True}      # -> HGVSc compared normally
 
 def test_diff_classifies_and_writes_tsv(tmp_path):
     tsv = tmp_path / "m.tsv"
@@ -80,3 +81,33 @@ def test_no_field_asymmetry_reports_empty_lists(tmp_path):
                    tsv_path=str(tmp_path / "m.tsv"))
     assert s["vepyr_only_fields"] == []
     assert s["gt_only_fields"] == []
+
+
+# --- Fix C: a CSQ entry too short to carry Feature has NO join key. It must be --
+# --- excluded from the join and counted -- never cross-paired against the other -
+# --- file's equally-keyless entry (which is how false value_diffs were minted). -
+
+def test_truncated_entries_never_cross_pair_and_are_counted(tmp_path):
+    tsv = tmp_path / "m.tsv"
+    # Both fixtures carry ENST_A + ENST_B with IDENTICAL values (listed in a
+    # DIFFERENT order) plus one truncated, Feature-less entry each. Any value_diff
+    # here is therefore false by construction.
+    s = diff_files(str(FIX / "vepyr_truncated.vcf"), str(FIX / "gt_truncated.vcf"),
+                   name="c", cache="k", combo_kwargs=COMBO_HGVS, tsv_path=str(tsv))
+
+    assert s["malformed_vepyr"] == 1
+    assert s["malformed_gt"] == 1
+    # only the two real transcripts joined; the keyless entries did NOT pair up
+    assert s["aligned_annotations"] == 2
+    produced = {c for pf in s["per_field"].values() for c in pf["by_category"]}
+    assert "value_diff" not in produced
+    assert s["overall_pct"] == 100.0
+    assert list(csv.DictReader(tsv.open(), delimiter="\t")) == []
+
+
+def test_clean_files_report_zero_malformed(tmp_path):
+    s = diff_files(str(FIX / "vepyr_mini.vcf"), str(FIX / "gt_mini.vcf"),
+                   name="c", cache="k", combo_kwargs=COMBO_NO_HGVS,
+                   tsv_path=str(tmp_path / "m.tsv"))
+    assert s["malformed_vepyr"] == 0
+    assert s["malformed_gt"] == 0
