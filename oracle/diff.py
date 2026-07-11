@@ -72,10 +72,23 @@ def _record_key(ref: str, alt: str) -> tuple[str, tuple[str, ...]]:
     return ref, tuple(sorted(alt.split(",")))
 
 
-def _grouped(gen):
+def _grouped(gen, stats=None):
     """Collapse consecutive records at the same (chrom,pos).
 
     -> (chrom, pos), {record_key: (raw_alt, feats)}
+
+    A REPEATED record key inside one group -- two VCF records with the same
+    (chrom, pos, ref, alt) -- keeps the FIRST and tallies the surplus into
+    `stats["duplicate_records"]`. It used to just overwrite: `buf[key] = ...` meant
+    the second record silently replaced the first, and because the sort guard runs
+    AFTER grouping (it only ever sees one group per position) nothing noticed. Two
+    records x one annotation each came out as aligned=1, only_*=0, malformed_*=0,
+    join_rate=1.0, overall_pct=100.0 -- an annotation erased without moving a single
+    counter, which is the exact failure mode this whole module exists to prevent.
+
+    Keeping the first and counting the rest mirrors parse_record()'s handling of a
+    repeated (Allele, Feature) key one level down: we do not guess which duplicate is
+    canonical, we decline to compare the surplus and make its existence VISIBLE.
     """
     cur_key = None
     buf: dict = {}
@@ -86,7 +99,12 @@ def _grouped(gen):
             yield cur_key, buf
             buf = {}
         cur_key = pos_key
-        buf[_record_key(ref, alt)] = (alt, feats)
+        rk = _record_key(ref, alt)
+        if rk in buf:                 # ambiguous -- never overwrite, never silently drop
+            if stats is not None:
+                stats["duplicate_records"] += 1
+            continue
+        buf[rk] = (alt, feats)
     if cur_key is not None:
         yield cur_key, buf
 
@@ -151,9 +169,11 @@ def diff_files(vepyr_vcf: str, gt_vcf: str, *, name: str, cache: str,
     cf = norm_chrom(chrom) if chrom else None
     acc = new_accumulator(shared)
     only_v = only_g = 0
-    # keyless CSQ entries: excluded from the join (they cannot be identified),
-    # but counted so their existence is never invisible in the report.
-    v_stats, g_stats = {"malformed": 0}, {"malformed": 0}
+    # Entries/records excluded from the join because they cannot be identified
+    # unambiguously -- keyless CSQ entries, and repeated (chrom,pos,ref,alt) records.
+    # Never silently dropped: counted, so their existence cannot be invisible.
+    v_stats = {"malformed": 0, "duplicate_records": 0}
+    g_stats = {"malformed": 0, "duplicate_records": 0}
 
     kw = {k: v for k, v in (("rel_tol", rel_tol), ("abs_tol", abs_tol)) if v is not None}
 
@@ -161,10 +181,10 @@ def diff_files(vepyr_vcf: str, gt_vcf: str, *, name: str, cache: str,
         writer = csv.writer(tsv_file, delimiter="\t")
         writer.writerow(TSV_HEADER)
 
-        vg = _checked(_grouped(_reader(vepyr_vcf, vf, v_feat, v_allele, cf, v_stats)),
-                      "vepyr_vcf", rank)
-        gg = _checked(_grouped(_reader(gt_vcf, gf, g_feat, g_allele, cf, g_stats)),
-                      "gt_vcf", rank)
+        vg = _checked(_grouped(_reader(vepyr_vcf, vf, v_feat, v_allele, cf, v_stats),
+                               v_stats), "vepyr_vcf", rank)
+        gg = _checked(_grouped(_reader(gt_vcf, gf, g_feat, g_allele, cf, g_stats),
+                               g_stats), "gt_vcf", rank)
         V, G = next(vg, None), next(gg, None)
         while V and G:
             if rank(V[0]) < rank(G[0]):
@@ -222,5 +242,7 @@ def diff_files(vepyr_vcf: str, gt_vcf: str, *, name: str, cache: str,
                     gt_only_fields=gt_only_fields,
                     malformed_vepyr=v_stats["malformed"],
                     malformed_gt=g_stats["malformed"],
+                    duplicate_records_vepyr=v_stats["duplicate_records"],
+                    duplicate_records_gt=g_stats["duplicate_records"],
                     mismatches_tsv=tsv_path,
                     chrom=chrom or "all")

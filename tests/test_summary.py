@@ -9,7 +9,8 @@ def _acc(field="SIFT"):
 
 
 def _finalize(acc, chrom, *, name="c", cache="k", only_vepyr=0, only_gt=0,
-              malformed_vepyr=0, malformed_gt=0, shared_fields=1,
+              malformed_vepyr=0, malformed_gt=0, duplicate_records_vepyr=0,
+              duplicate_records_gt=0, shared_fields=1,
               vepyr_only_fields=(), gt_only_fields=(), status="ok"):
     """finalize() with EXACTLY the extras diff_files() attaches -- a real shard."""
     seen = acc["aligned"] + only_vepyr + only_gt
@@ -20,6 +21,8 @@ def _finalize(acc, chrom, *, name="c", cache="k", only_vepyr=0, only_gt=0,
         shared_fields=shared_fields,
         vepyr_only_fields=list(vepyr_only_fields), gt_only_fields=list(gt_only_fields),
         malformed_vepyr=malformed_vepyr, malformed_gt=malformed_gt,
+        duplicate_records_vepyr=duplicate_records_vepyr,
+        duplicate_records_gt=duplicate_records_gt,
         mismatches_tsv=f"/out/{chrom}.tsv", chrom=chrom,
     )
     s["status"] = status
@@ -107,14 +110,18 @@ def test_merge_propagates_every_key_a_shard_carries():
 
 def test_merge_sums_the_coverage_counters():
     m = merge([
-        _shard("21", match=3, only_vepyr=2, only_gt=1, malformed_vepyr=4, malformed_gt=5),
-        _shard("22", match=7, only_vepyr=8, only_gt=9, malformed_vepyr=1, malformed_gt=2),
+        _shard("21", match=3, only_vepyr=2, only_gt=1, malformed_vepyr=4, malformed_gt=5,
+               duplicate_records_vepyr=1, duplicate_records_gt=10),
+        _shard("22", match=7, only_vepyr=8, only_gt=9, malformed_vepyr=1, malformed_gt=2,
+               duplicate_records_vepyr=2, duplicate_records_gt=2),
     ])
     assert m["aligned_annotations"] == 10
     assert m["only_vepyr"] == 10
     assert m["only_gt"] == 10
     assert m["malformed_vepyr"] == 5
     assert m["malformed_gt"] == 7
+    assert m["duplicate_records_vepyr"] == 3
+    assert m["duplicate_records_gt"] == 12
 
 
 def test_merge_recomputes_join_rate_from_the_summed_counters():

@@ -78,7 +78,8 @@ def finalize(acc: dict, name: str, cache: str, **extra: Any) -> dict:
 IDENTITY_KEYS = ("name", "cache")          # must be identical across shards
 STATUS_KEY = "status"
 SUM_KEYS = ("aligned_annotations", "only_vepyr", "only_gt",
-            "malformed_vepyr", "malformed_gt")
+            "malformed_vepyr", "malformed_gt",
+            "duplicate_records_vepyr", "duplicate_records_gt")
 EQUAL_KEYS = ("shared_fields", "vepyr_only_fields", "gt_only_fields")
 COLLECT_KEYS = {"chrom": "chroms", "mismatches_tsv": "mismatches_tsvs"}
 DERIVED_KEYS = ("overall_pct", "per_field", "samples", "join_rate")

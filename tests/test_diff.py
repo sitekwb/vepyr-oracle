@@ -285,3 +285,35 @@ def test_a_shard_set_missing_a_chromosome_cannot_masquerade_as_the_whole_file(tm
                          tsv_path=str(tmp_path / "21.tsv"), chrom="21")
     with pytest.raises(ValueError, match="22"):
         merge([only_21], expected_chroms={"21", "22"})
+
+
+# --- IMPORTANT 7: _grouped() silently OVERWROTE a duplicate (chrom,pos,ref,alt) ---
+# --- record -- the second replaced the first. The sort guard runs AFTER grouping, --
+# --- so it saw one group and said nothing. parse_record() already counts duplicate --
+# --- (Allele, Feature) keys as malformed; the same collision ONE LEVEL UP was the --
+# --- last unguarded silent-loss path. ---------------------------------------------
+
+def test_duplicate_records_are_counted_and_never_overwrite_each_other(tmp_path):
+    """Both files carry chr22:100 A>G TWICE (ENST1, then ENST2) plus chr22:200.
+
+    Before: the second record replaced the first, so 3 annotations per side became
+    aligned=2 with only_*=0, malformed_*=0, join_rate=1.0 and overall_pct=100.0 --
+    ENST1's annotation vanished without moving a single counter.
+    """
+    s = diff_files(str(FIX / "vepyr_duprecord.vcf"), str(FIX / "gt_duprecord.vcf"),
+                   name="c", cache="k", combo_kwargs=COMBO_HGVS,
+                   tsv_path=str(tmp_path / "m.tsv"))
+
+    # first record wins (never overwritten), the surplus is COUNTED, not erased
+    assert s["duplicate_records_vepyr"] == 1
+    assert s["duplicate_records_gt"] == 1
+    assert s["aligned_annotations"] == 2
+    assert s["overall_pct"] == 100.0        # ...of what actually got compared
+
+
+def test_clean_files_report_zero_duplicate_records(tmp_path):
+    s = diff_files(str(FIX / "vepyr_mini.vcf"), str(FIX / "gt_mini.vcf"),
+                   name="c", cache="k", combo_kwargs=COMBO_NO_HGVS,
+                   tsv_path=str(tmp_path / "m.tsv"))
+    assert s["duplicate_records_vepyr"] == 0
+    assert s["duplicate_records_gt"] == 0
