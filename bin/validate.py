@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+"""Diff ONE combo's already-annotated vepyr VCF against ground truth, ONE process.
+
+This is `bin/run_wgs.py`'s diff-side counterpart -- see that script's docstring for
+why one-combo-per-invocation is what fits a whole-genome validation run inside the
+cluster's 24h wall-clock cap. `run_wgs.py` produces the annotated VCF; this script
+consumes it (`--vepyr FILE`) and never calls vepyr itself, so it has no lazy-import
+concern of its own -- but it still avoids importing anything heavier than
+`oracle.diff` / `oracle.matrix`, both pure stdlib.
+
+Usage:
+  validate.py --combo NAME --version {115,116} --vepyr FILE --outdir DIR [--chrom C]
+
+Writes:
+  <outdir>/summary_<combo>[_<chrom>].json
+  <outdir>/mismatches/<combo>[_<chrom>].tsv
+
+Resumable: if the summary JSON already exists (and is non-empty), this exits 0
+immediately -- re-running a shard's diff after preemption or a resubmit is a no-op.
+
+If the ground-truth VCF for this combo/version is missing, this writes a minimal
+`{"name":..., "cache":..., "status":"no_gt"}` summary and exits 0. A missing GT is a
+known, expected gap (not every combo necessarily has both 115 and 116 ground truth
+at every point in the run) -- it must NEVER crash a SLURM array job that has dozens
+of healthy siblings still running.
+
+Otherwise this calls `oracle.diff.diff_files()` and dumps its summary JSON, then
+prints the headline number ALONGSIDE the coverage signals that can silently hollow
+it out: `overall_pct` and `join_rate` are always printed together (a diff that only
+joined 2% of annotations can still show 100% overall_pct on the scraps it managed to
+compare), plus `only_vepyr` / `only_gt` / `malformed_*` / `duplicate_records_*` --
+see oracle/diff.py and oracle/summary.py for the concrete failure mode each of these
+guards against.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from oracle.diff import diff_files
+from oracle.matrix import load_matrix
+
+#: Overridable so the smoke tests (tests/test_cli.py) can point this CLI at a tmp
+#: dir instead of the real cluster paths, without touching ~/vepyr at all.
+DATA_DIR = os.environ.get("VEPYR_DATA", os.path.expanduser("~/vepyr/data"))
+WORK_DIR = os.environ.get("VEPYR_WORK", os.path.expanduser("~/vepyr/work"))
+
+MATRIX_PATH = os.path.join(WORK_DIR, "matrix.tsv")
+GT_DIR = os.path.join(DATA_DIR, "ground_truth_vep")
+
+#: The coverage signals printed alongside overall_pct -- a concordance percentage
+#: without these is untrustworthy (see module docstring).
+_COVERAGE_KEYS = ("join_rate", "only_vepyr", "only_gt", "malformed_vepyr",
+                  "malformed_gt", "duplicate_records_vepyr", "duplicate_records_gt")
+
+
+def summary_path(outdir: str, combo: str, chrom: str | None) -> str:
+    suffix = f"_{chrom}" if chrom else ""
+    return os.path.join(outdir, f"summary_{combo}{suffix}.json")
+
+
+def mismatches_path(outdir: str, combo: str, chrom: str | None) -> str:
+    suffix = f"_{chrom}" if chrom else ""
+    return os.path.join(outdir, "mismatches", f"{combo}{suffix}.tsv")
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(
+        prog="validate.py", description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ap.add_argument("--combo", required=True, help="combo name, must exist in matrix.tsv")
+    ap.add_argument("--version", type=int, required=True, choices=[115, 116])
+    ap.add_argument("--vepyr", required=True, help="the vepyr-annotated VCF to check")
+    ap.add_argument("--outdir", required=True)
+    ap.add_argument("--chrom", help="restrict the diff to one chromosome (an L1/L2 shard)")
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+
+    os.makedirs(args.outdir, exist_ok=True)
+    out_summary = summary_path(args.outdir, args.combo, args.chrom)
+
+    if os.path.exists(out_summary) and os.path.getsize(out_summary) > 0:
+        print(f"[validate] {args.combo}: {out_summary} already exists -- resuming (skip)")
+        return 0
+
+    matrix = load_matrix(MATRIX_PATH)
+    if args.combo not in matrix:
+        print(f"[FATAL] combo {args.combo!r} not found in {MATRIX_PATH} "
+              f"(known combos: {sorted(matrix)})", file=sys.stderr)
+        return 2
+    row = matrix[args.combo]
+    cache = row[f"cache{args.version}"]
+    gt_path = os.path.join(GT_DIR, row[f"gt{args.version}"])
+
+    if not os.path.exists(gt_path):
+        summary = {"name": args.combo, "cache": cache, "status": "no_gt"}
+        with open(out_summary, "w") as fh:
+            json.dump(summary, fh, indent=2)
+        print(f"[validate] {args.combo}/{args.version}: no ground truth at {gt_path!r} "
+              f"-- wrote {out_summary} (status=no_gt)")
+        return 0
+
+    out_mismatches = mismatches_path(args.outdir, args.combo, args.chrom)
+    os.makedirs(os.path.dirname(out_mismatches), exist_ok=True)
+
+    combo_kwargs = json.loads(row["vepyr_kwargs"])
+    summary = diff_files(args.vepyr, gt_path, name=args.combo, cache=cache,
+                         combo_kwargs=combo_kwargs, tsv_path=out_mismatches,
+                         chrom=args.chrom)
+
+    with open(out_summary, "w") as fh:
+        json.dump(summary, fh, indent=2)
+
+    # A concordance % without the join rate is untrustworthy -- never print
+    # overall_pct alone. Every other coverage signal that can silently hollow out
+    # the headline number goes on the same line.
+    coverage = " ".join(f"{k}={summary[k]}" for k in _COVERAGE_KEYS)
+    print(f"[validate] {args.combo}/{args.version} chrom={args.chrom or 'all'}: "
+          f"overall_pct={summary['overall_pct']} {coverage}")
+    print(f"[validate] wrote {out_summary}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
