@@ -75,7 +75,17 @@ if [ -z "$CACHE116" ] || [ -z "$FLAGS" ]; then
          "$MATRIX -- run bin/seed_matrix.py first" >&2
     exit 2
 fi
-CACHE="$DATA/$CACHE116"
+# NOT the vepyr parquet cache ($DATA/116_GRCh38_*) -- Perl VEP cannot read parquet.
+# VEP needs the NATIVE Ensembl cache, laid out as homo_sapiens_merged/116_GRCh38/.
+# slurm/fetch_vep116_cache.sh downloads it here. The recovered flags already carry
+# --merged / --refseq, which is what selects the right subdirectory.
+CACHE="$DATA/vep_native_cache_116"
+if [ ! -d "$CACHE" ]; then
+    echo "FATAL: native VEP 116 cache missing at $CACHE" >&2
+    echo "  Run slurm/fetch_vep116_cache.sh first. The parquet caches in" >&2
+    echo "  $DATA/116_GRCh38_* are vepyr's format and are UNREADABLE by Perl VEP." >&2
+    exit 1
+fi
 
 OUTDIR="$DATA/ground_truth_vep_116/shards"
 mkdir -p "$OUTDIR"
