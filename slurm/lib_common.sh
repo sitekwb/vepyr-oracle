@@ -114,32 +114,62 @@ ensure_region_input() {
 # load_apptainer
 #
 # Makes `apptainer` usable inside a SLURM batch job. Call this instead of a bare
-# `module load apptainer`.
+# `module load apptainer`. VERIFIED on compute node h52.
 #
-# WHY THIS EXISTS (job 63397 died on it):
-#   `module` is a bash FUNCTION, not a binary. An interactive login shell defines
-#   it via /etc/profile.d/modules.sh. A SLURM batch script (`#!/bin/bash` --
-#   non-login, non-interactive) does NOT source that file. It only works by
-#   accident when the SUBMITTING shell was interactive, because --export=ALL then
-#   carries the exported function into the job env. Submit from a non-interactive
-#   shell (e.g. `ssh host bash -s`, or any automation) and the job dies in 1s with
-#       line NN: module: command not found        (exit 127)
-#   So: source the init explicitly. Never rely on the inherited function.
+# THREE separate traps here, all of which bit us for real (jobs 63397/63398):
 #
-# ALSO: `module load apptainer` PRE-SETS APPTAINER_CACHEDIR/TMPDIR to
-#   /local/ssd/{cache,tmp}, which is not writable from every node. We override
-#   them UNCONDITIONALLY -- a `${VAR:-default}` would keep the module's value and
-#   the pull would fail on a non-writable cache dir.
+# 1. `module` is a bash FUNCTION, not a binary. A SLURM batch script is
+#    non-login/non-interactive and does NOT source any profile, so `module` is
+#    simply undefined -> "module: command not found", exit 127, dead in 1 second.
+#    The other scripts on this cluster only work by accident: they were submitted
+#    from an INTERACTIVE shell, and --export=ALL carried the exported function into
+#    the job. Submit from automation (`ssh host bash -s`) and that vanishes.
+#    => source the Lmod init EXPLICITLY. Note the compute nodes have Lmod at
+#       /opt/apps/lmod/lmod/init/bash; /etc/profile.d/modules.sh exists ONLY on the
+#       login node. Do not trust the login node's layout.
+#
+# 2. MODULEPATH is UNSET on the compute nodes, so even with `module` defined, Lmod
+#    finds nothing ("Lmod Warning: MODULEPATH is undefined"). The apptainer
+#    modulefile lives on the node-local SSD: /local/ssd/apps/lmod/lmod/modulefiles
+#
+# 3. NEVER pipe `module load` (e.g. `module load apptainer | head`). A pipeline runs
+#    it in a SUBSHELL, so its PATH mutation is discarded and apptainer silently
+#    stays missing. This one wasted a debugging cycle -- the module was loading fine
+#    and the test was throwing the result away.
+#
+# Finally: the modulefile SETS APPTAINER_CACHEDIR=/local/ssd/cache/apptainer, whose
+# parent is NOT writable. We override to $SCRATCH UNCONDITIONALLY -- a ${VAR:-default}
+# would keep the module's unwritable value.
 load_apptainer() {
-    if ! declare -F module >/dev/null 2>&1 && ! command -v module >/dev/null 2>&1; then
-        # shellcheck disable=SC1091
-        [ -f /etc/profile.d/modules.sh ] && source /etc/profile.d/modules.sh
+    if ! declare -F module >/dev/null 2>&1; then
+        local init
+        for init in /opt/apps/lmod/lmod/init/bash \
+                    /local/ssd/apps/lmod/lmod/init/bash \
+                    /etc/profile.d/modules.sh; do
+            # shellcheck disable=SC1090
+            [ -f "$init" ] && { source "$init"; break; }
+        done
     fi
-    module load apptainer/1.5.0 2>/dev/null || module load apptainer
+
+    local mp
+    for mp in /local/ssd/apps/lmod/lmod/modulefiles /opt/apps/lmod/lmod/modulefiles; do
+        [ -d "$mp" ] && export MODULEPATH="$mp${MODULEPATH:+:$MODULEPATH}"
+    done
+
+    # NO pipe, NO subshell -- must mutate THIS shell's PATH (trap 3 above).
+    module load apptainer/1.5.0 || module load apptainer || true
 
     : "${SCRATCH:=/scratch/$USER}"
     export SCRATCH
     export APPTAINER_CACHEDIR="$SCRATCH/.apptainer/cache"
     export APPTAINER_TMPDIR="$SCRATCH/.apptainer/tmp"
     mkdir -p "$APPTAINER_CACHEDIR" "$APPTAINER_TMPDIR"
+
+    if ! command -v apptainer >/dev/null 2>&1; then
+        echo "FATAL: apptainer not on PATH after load_apptainer." >&2
+        echo "  host=$(hostname) MODULEPATH=${MODULEPATH:-<unset>}" >&2
+        echo "  Expected the binary at /local/ssd/apps/apptainer/1.5.0/bin/apptainer" >&2
+        echo "  and the modulefile at /local/ssd/apps/lmod/lmod/modulefiles/apptainer/" >&2
+        exit 1
+    fi
 }
