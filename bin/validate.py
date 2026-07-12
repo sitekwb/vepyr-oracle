@@ -41,7 +41,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from oracle.diff import diff_files
-from oracle.matrix import load_matrix
+from oracle.matrix import kwargs_from_row, load_matrix
 
 #: Overridable so the smoke tests (tests/test_cli.py) can point this CLI at a tmp
 #: dir instead of the real cluster paths, without touching ~/vepyr at all.
@@ -99,6 +99,16 @@ def main(argv: list[str] | None = None) -> int:
     cache = row[f"cache{args.version}"]
     gt_path = os.path.join(GT_DIR, row[f"gt{args.version}"])
 
+    # BEFORE the no_gt short-circuit: an unseeded row is a broken MATRIX, not a
+    # missing ground truth, and must not be laundered into a benign-looking
+    # status=no_gt summary. It is also what drift.py's flag-aware classification
+    # reads -- empty kwargs there would silently reclassify real mismatches.
+    try:
+        combo_kwargs = kwargs_from_row(row)
+    except ValueError as exc:
+        print(f"[FATAL] {exc}", file=sys.stderr)
+        return 2
+
     if not os.path.exists(gt_path):
         summary = {"name": args.combo, "cache": cache, "status": "no_gt"}
         with open(out_summary, "w") as fh:
@@ -110,7 +120,6 @@ def main(argv: list[str] | None = None) -> int:
     out_mismatches = mismatches_path(args.outdir, args.combo, args.chrom)
     os.makedirs(os.path.dirname(out_mismatches), exist_ok=True)
 
-    combo_kwargs = json.loads(row["vepyr_kwargs"])
     summary = diff_files(args.vepyr, gt_path, name=args.combo, cache=cache,
                          combo_kwargs=combo_kwargs, tsv_path=out_mismatches,
                          chrom=args.chrom)

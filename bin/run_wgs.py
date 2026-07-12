@@ -47,7 +47,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from oracle.csq import open_maybe_gzip
-from oracle.matrix import load_matrix, resolve_kwargs
+from oracle.matrix import kwargs_from_row, load_matrix, resolve_kwargs
 
 #: Overridable so the smoke tests (tests/test_cli.py) can point this CLI at a tmp
 #: dir instead of the real cluster paths, without touching ~/vepyr at all.
@@ -129,8 +129,14 @@ def main(argv: list[str] | None = None) -> int:
 
     cache_col = f"cache{args.version}"
     cache_dir = os.path.join(DATA_DIR, row[cache_col])
-    kwargs = resolve_kwargs(json.loads(row["vepyr_kwargs"]),
-                            plugin_cache_root=PLUGIN_CACHE_ROOT)
+    # Both raise rather than guess: an unseeded row has no known semantics, and an
+    # unresolved plugin sentinel must never reach annotate() (see oracle/matrix.py).
+    try:
+        kwargs = resolve_kwargs(kwargs_from_row(row),
+                                plugin_cache_root=PLUGIN_CACHE_ROOT)
+    except ValueError as exc:
+        print(f"[FATAL] {exc}", file=sys.stderr)
+        return 2
 
     inp, chrom_label = resolve_input(args)
     if not os.path.exists(inp):

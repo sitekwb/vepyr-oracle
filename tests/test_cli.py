@@ -188,6 +188,36 @@ def test_validate_runs_the_real_diff_when_gt_is_present(tmp_path):
     assert "overall_pct=" in result.stdout and "join_rate=" in result.stdout
 
 
+# --- an UNSEEDED row must stop both CLIs dead -------------------------------
+#
+# bin/seed_matrix.py writes EMPTY vepyr_kwargs/vep_flags for a combo whose ground
+# truth it could not read (missing header, unmappable flag, cache-flavor mismatch) --
+# deliberately, so that "we do not know this combo's semantics" can never be mistaken
+# for "this combo needs no flags". Both CLIs must therefore refuse the row outright
+# rather than crash on json.loads("") -- or, far worse, treat it as `{}` and annotate
+# with vepyr's defaults against a ground truth generated with --everything --hgvs.
+
+@pytest.mark.parametrize("cli", ["run_wgs", "validate"])
+def test_cli_refuses_a_combo_whose_kwargs_were_never_seeded(tmp_path, cli):
+    data_dir = tmp_path / "data"
+    work_dir = tmp_path / "work"
+    (data_dir / "ground_truth_vep").mkdir(parents=True)
+    work_dir.mkdir()
+    _write_matrix(str(work_dir / "matrix.tsv"), vepyr_kwargs="", vep_flags="")
+
+    env = {**os.environ, "VEPYR_DATA": str(data_dir), "VEPYR_WORK": str(work_dir)}
+    args = ([RUN_WGS, "--combo", "hgvs_merged", "--version", "115",
+             "--chrom", "22", "--out", str(tmp_path / "out.vcf")]
+            if cli == "run_wgs" else
+            [VALIDATE, "--combo", "hgvs_merged", "--version", "115",
+             "--vepyr", "/nonexistent.vcf", "--outdir", str(tmp_path / "out")])
+    result = _run(args, env=env)
+
+    assert result.returncode != 0
+    assert "hgvs_merged" in result.stderr
+    assert "seed_matrix" in result.stderr    # tell the operator what to do about it
+
+
 def test_validate_unknown_combo_exits_nonzero_with_a_clear_message(tmp_path):
     data_dir = tmp_path / "data"
     work_dir = tmp_path / "work"
