@@ -163,6 +163,28 @@ def _shard(combo: str, step: Step, level: Level, chrom: str, chunk: int | None,
     )
 
 
+def chunk_sizes(n_total: int, num_chunks: int) -> list[int]:
+    """Partition `n_total` items into `num_chunks` groups as evenly as possible:
+    the first `n_total % num_chunks` groups get one extra item, the rest get
+    `n_total // num_chunks`. No group is ever more than one item bigger than
+    another -- that is what makes the largest group's estimate a safe upper
+    bound on every other group's.
+
+    This is the ONE formula that decides "how many variants does L2 chunk i
+    carry" -- shared between `_chunk_chrom` below (which decides HOW MANY L2
+    chunks a chromosome needs, from the safety-adjusted rate) and
+    `oracle.regions.quantile_regions` (which turns that chunk count into
+    concrete genomic coordinates over the chromosome's ACTUAL variant
+    positions). Two independent implementations of "the same" partition is
+    exactly how a plan and the region file that must realise it drift apart;
+    sharing this function makes that impossible by construction.
+    """
+    if num_chunks < 1:
+        raise ValueError(f"chunk_sizes(): num_chunks must be >= 1, got {num_chunks!r}")
+    base, rem = divmod(n_total, num_chunks)
+    return [base + 1 if i < rem else base for i in range(num_chunks)]
+
+
 def _chunk_chrom(combo: str, step: Step, chrom: str, n_variants: int,
                  sec_per_variant: float, safety_factor: float,
                  max_chunks_per_chrom: int) -> list[Shard]:
@@ -192,8 +214,7 @@ def _chunk_chrom(combo: str, step: Step, chrom: str, n_variants: int,
                 f"sec_per_variant, or raise max_chunks_per_chrom if the estimate is "
                 f"simply coarse."
             )
-        base, rem = divmod(n_variants, num_chunks)
-        sizes = [base + 1 if i < rem else base for i in range(num_chunks)]
+        sizes = chunk_sizes(n_variants, num_chunks)
         if _hours(max(sizes), eff) <= BAND_HI_H:
             break
         num_chunks += 1
