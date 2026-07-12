@@ -14,7 +14,9 @@
 #      missing --pick_order (the ground truth used biotype,rank,mane_select,... ; we were
 #      passing vepyr's default until now)
 set -euo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/lib_common.sh"
+# NOTE: SLURM COPIES the batch script to /var/spool/slurmd/jobNNN/, so BASH_SOURCE
+# points at the spool dir, not work/slurm/. Must fall back to the real path.
+source "${VEPYR_WORK:-$HOME/vepyr/work}/slurm/lib_common.sh"
 
 WORK="${VEPYR_WORK:-$HOME/vepyr/work}"
 PY="${VEPYR_PYTHON:-$HOME/vepyr/venv/bin/python3}"
