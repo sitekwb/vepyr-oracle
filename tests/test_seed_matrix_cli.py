@@ -84,10 +84,11 @@ def test_prints_both_sides_of_every_combo_so_a_human_can_eyeball_them(cluster):
     assert "--flag_pick_allele_gene" in result.stdout
     assert "--pick_order biotype,rank,mane_select,tsl,canonical,appris,ccds,length" \
         in result.stdout
-    # ...and the vepyr side, right next to it
+    # ...and the vepyr side, right next to it (pick_order verbatim -- vepyr's API
+    # takes `str | None`, so what is printed is exactly what annotate() receives)
     assert "flag_pick_allele_gene=True" in result.stdout
-    assert "pick_order=['biotype', 'rank', 'mane_select', 'tsl', 'canonical', " \
-           "'appris', 'ccds', 'length']" in result.stdout
+    assert "pick_order='biotype,rank,mane_select,tsl,canonical,appris,ccds,length'" \
+        in result.stdout
     # the plugin sentinel must be visible as a sentinel, never as a plausible path
     assert "plugin_cache_root=<NEEDS_PLUGIN_CACHE>" in result.stdout
 

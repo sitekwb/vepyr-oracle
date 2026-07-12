@@ -181,17 +181,31 @@ def _next_token_as_value(tokens: list[str], i: int, flag: str,
     return tokens[i], i + 1
 
 
-def _parse_pick_order(value: str, combo: str) -> list[str]:
-    """`--pick_order biotype,rank,...` -> `["biotype", "rank", ...]`.
+def _parse_pick_order(value: str, combo: str) -> str:
+    """`--pick_order biotype,rank,...` -> `"biotype,rank,..."` -- the RAW comma string.
 
-    A list is the natural Python shape for vepyr's `pick_order` kwarg. THIS IS THE
-    ONE PLACE to change if the real API turns out to want the raw comma string --
-    it is unverified against vepyr and must be confirmed on the first real run.
+    DO NOT split this into a list. Verified against the real API on the cluster:
+
+        inspect.signature(vepyr.annotate).parameters["pick_order"]
+          annotation : str | None
+          default    : None
+
+    vepyr takes the comma string exactly as VEP's `--pick_order` spells it, so the
+    value is passed through verbatim and only VALIDATED here (never reshaped).
+
+    Splitting it is not a harmless nicety, it is the bug: `pick_order` decides WHICH
+    transcript gets picked, and if vepyr were to ignore a value it cannot use rather
+    than reject it, we would silently fall back to VEP's DEFAULT order (mane_select /
+    canonical first) while the ground truth used the explicit order (biotype, rank
+    first). Different order => different transcript => a diff that reports "vepyr
+    picked the wrong transcript" for an order WE never passed it -- indistinguishable
+    from a real engine bug. That phantom finding is what this whole module fixes; see
+    the module docstring.
     """
-    terms = [t.strip() for t in value.split(",") if t.strip()]
-    if not terms:
+    order = value.strip()
+    if not [t for t in order.split(",") if t.strip()]:
         raise ValueError(f"combo {combo!r}: --pick_order has no terms: {value!r}")
-    return terms
+    return order
 
 
 def _parse_plugin(value: str, combo: str) -> _NeedsPluginCache:

@@ -41,9 +41,11 @@ _IO = ("--cache --offline --database 0 "
 
 _PICK_ORDER = "--pick_order biotype,rank,mane_select,tsl,canonical,appris,ccds,length"
 
-#: what every pick-family combo's `--pick_order` must become on the vepyr side
-PICK_ORDER = ["biotype", "rank", "mane_select", "tsl", "canonical", "appris",
-              "ccds", "length"]
+#: What every pick-family combo's `--pick_order` must become on the vepyr side: the
+#: RAW COMMA STRING, verbatim. VERIFIED against the real API on the cluster --
+#: `inspect.signature(vepyr.annotate).parameters["pick_order"]` is `str | None`
+#: (default `None`). NOT a list. See _parse_pick_order in oracle/matrix.py.
+PICK_ORDER = "biotype,rank,mane_select,tsl,canonical,appris,ccds,length"
 
 REAL_CMDLINES: dict[str, str] = {
     "hgvs_merged":
@@ -163,14 +165,26 @@ def test_no_recovered_flag_is_silently_dropped_from_any_combo():
                     f"derived vepyr kwargs do not carry {key!r}: {derived}")
 
 
-def test_pick_order_is_a_list_of_terms_not_a_comma_string():
-    """UNVERIFIED against vepyr's real API -- a list is the natural Python shape and
-    must be confirmed on the first real run; if vepyr wants the raw comma string,
-    THIS is the single place to change it."""
+def test_pick_order_is_the_raw_comma_string_NOT_a_list():
+    """VERIFIED on the cluster against the real API:
+
+        inspect.signature(vepyr.annotate).parameters["pick_order"]
+          annotation : str | None
+          default    : None
+
+    So `pick_order` is passed through VERBATIM, exactly as it appeared after
+    `--pick_order`. Do NOT "helpfully" split it into a list: a list is not what the
+    signature accepts, and if vepyr were ever to ignore an unusable value rather than
+    reject it, we would silently revert to VEP's DEFAULT pick order (mane_select /
+    canonical first) -- resurrecting the phantom "vepyr picked the wrong transcript"
+    findings, indistinguishable from a real engine bug. That is the entire class of
+    failure this module exists to prevent.
+    """
     order = _derive("hgvs_merged_per_gene")["pick_order"]
-    assert isinstance(order, list)
-    assert order[0] == "biotype" and order[1] == "rank"   # NOT VEP's default order
-    assert order != "biotype,rank,mane_select,tsl,canonical,appris,ccds,length"
+    assert order == "biotype,rank,mane_select,tsl,canonical,appris,ccds,length"
+    assert isinstance(order, str)
+    assert not isinstance(order, list)
+    assert order.split(",")[0] == "biotype"     # the GT's order, NOT VEP's default
 
 
 def test_plugin_becomes_the_typed_sentinel_not_a_parsed_path():
@@ -196,7 +210,7 @@ def test_flags_may_use_the_equals_form():
     kwargs = vep_flags_to_vepyr_kwargs(
         "vep --everything --hgvs --merged --pick_order=biotype,rank --cache",
         combo="x", cache_flavor="merged")
-    assert kwargs == {"everything": True, "hgvs": True, "pick_order": ["biotype", "rank"]}
+    assert kwargs == {"everything": True, "hgvs": True, "pick_order": "biotype,rank"}
 
 
 def test_command_line_without_the_leading_program_token_still_parses():
