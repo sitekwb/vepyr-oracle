@@ -128,6 +128,14 @@ fi
 # conflict with) the values THIS script re-points at the 116 cache/our
 # input/our output. Everything else (--everything, --hgvs, --pick, --plugin
 # AlphaMissense,..., ...) survives verbatim -- that fidelity is the whole point.
+# The ground-truth headers were templated: paths appear as the literal string
+# "[PATH]". --fasta/--input_file/--output_file are stripped and re-pointed below,
+# but --plugin survives VERBATIM (that fidelity is the point), so ITS [PATH] must be
+# substituted or VEP is handed a nonexistent AlphaMissense file and the plugin
+# silently contributes nothing.
+AM_DIR="$DATA/plugin_input/alphamissense"
+FLAGS=${FLAGS//\[PATH\]/$AM_DIR}
+
 CLEAN=$("$PY" -c '
 import shlex
 import sys

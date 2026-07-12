@@ -143,12 +143,15 @@ ensure_region_input() {
 load_apptainer() {
     if ! declare -F module >/dev/null 2>&1; then
         local init
+        # The Lmod init script references unset vars (FPATH); `set -u` would abort.
+        set +u
         for init in /opt/apps/lmod/lmod/init/bash \
                     /local/ssd/apps/lmod/lmod/init/bash \
                     /etc/profile.d/modules.sh; do
             # shellcheck disable=SC1090
             [ -f "$init" ] && { source "$init"; break; }
         done
+        set -u
     fi
 
     local mp
