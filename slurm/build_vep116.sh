@@ -24,8 +24,9 @@
 # be able to hide behind "the file already exists".)
 set -euo pipefail
 
-module load apptainer/1.5.0
-
+source "$(dirname "${BASH_SOURCE[0]}")/lib_common.sh" 2>/dev/null \
+  || source "${VEPYR_WORK:-$HOME/vepyr/work}/slurm/lib_common.sh"
+load_apptainer
 SIF="${VEPYR_VEP116_SIF:-$HOME/bvp/vep116.sif}"
 IMAGE="docker://ensemblorg/ensembl-vep:release_116.0"
 

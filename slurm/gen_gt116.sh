@@ -31,8 +31,9 @@
 # Resume-safe: skips if the output VCF already exists and is non-empty.
 set -euo pipefail
 
-module load apptainer/1.5.0
-
+source "$(dirname "${BASH_SOURCE[0]}")/lib_common.sh" 2>/dev/null \
+  || source "${VEPYR_WORK:-$HOME/vepyr/work}/slurm/lib_common.sh"
+load_apptainer
 DATA="${VEPYR_DATA:-$HOME/vepyr/data}"
 WORK="${VEPYR_WORK:-$HOME/vepyr/work}"
 PY="${VEPYR_PYTHON:-$HOME/vepyr/venv/bin/python3}"

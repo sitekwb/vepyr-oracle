@@ -35,6 +35,9 @@
 # check is not trusted just because it is present -- see below).
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/lib_common.sh" 2>/dev/null \
+  || source "${VEPYR_WORK:-$HOME/vepyr/work}/slurm/lib_common.sh"
+load_apptainer
 DATA="${VEPYR_DATA:-$HOME/vepyr/data}"
 WORK="${VEPYR_WORK:-$HOME/vepyr/work}"
 BCFTOOLS_SIF="${VEPYR_BCFTOOLS_SIF:-$HOME/aidiva-onb/bcftools.sif}"

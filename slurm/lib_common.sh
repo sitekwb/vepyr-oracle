@@ -110,3 +110,36 @@ ensure_region_input() {
     apptainer exec -B "$work:$work" "$bcftools_sif" bcftools index -t -f "$out"
     echo "[lib_common] sliced $chrom_input -r $region -> $out"
 }
+
+# load_apptainer
+#
+# Makes `apptainer` usable inside a SLURM batch job. Call this instead of a bare
+# `module load apptainer`.
+#
+# WHY THIS EXISTS (job 63397 died on it):
+#   `module` is a bash FUNCTION, not a binary. An interactive login shell defines
+#   it via /etc/profile.d/modules.sh. A SLURM batch script (`#!/bin/bash` --
+#   non-login, non-interactive) does NOT source that file. It only works by
+#   accident when the SUBMITTING shell was interactive, because --export=ALL then
+#   carries the exported function into the job env. Submit from a non-interactive
+#   shell (e.g. `ssh host bash -s`, or any automation) and the job dies in 1s with
+#       line NN: module: command not found        (exit 127)
+#   So: source the init explicitly. Never rely on the inherited function.
+#
+# ALSO: `module load apptainer` PRE-SETS APPTAINER_CACHEDIR/TMPDIR to
+#   /local/ssd/{cache,tmp}, which is not writable from every node. We override
+#   them UNCONDITIONALLY -- a `${VAR:-default}` would keep the module's value and
+#   the pull would fail on a non-writable cache dir.
+load_apptainer() {
+    if ! declare -F module >/dev/null 2>&1 && ! command -v module >/dev/null 2>&1; then
+        # shellcheck disable=SC1091
+        [ -f /etc/profile.d/modules.sh ] && source /etc/profile.d/modules.sh
+    fi
+    module load apptainer/1.5.0 2>/dev/null || module load apptainer
+
+    : "${SCRATCH:=/scratch/$USER}"
+    export SCRATCH
+    export APPTAINER_CACHEDIR="$SCRATCH/.apptainer/cache"
+    export APPTAINER_TMPDIR="$SCRATCH/.apptainer/tmp"
+    mkdir -p "$APPTAINER_CACHEDIR" "$APPTAINER_TMPDIR"
+}

@@ -28,8 +28,9 @@ case "$VERSION" in
     *) echo "[FATAL] version must be 115 or 116, got: $VERSION" >&2; exit 2 ;;
 esac
 
-module load apptainer/1.5.0
-
+source "$(dirname "${BASH_SOURCE[0]}")/lib_common.sh" 2>/dev/null \
+  || source "${VEPYR_WORK:-$HOME/vepyr/work}/slurm/lib_common.sh"
+load_apptainer
 WORK="${VEPYR_WORK:-$HOME/vepyr/work}"
 PY="${VEPYR_PYTHON:-$HOME/vepyr/venv/bin/python3}"
 BCFTOOLS_SIF="${VEPYR_BCFTOOLS_SIF:-$HOME/aidiva-onb/bcftools.sif}"
