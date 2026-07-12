@@ -20,9 +20,14 @@ Input resolution (--chrom and --region are mutually exclusive):
   --chrom C                 -> the pre-sliced L1 chromosome at
       $VEPYR_WORK/input/input_<chrom>.vcf.gz
   neither                    -> the whole-WGS input at
-      $VEPYR_DATA/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz
+      $VEPYR_DATA/HG002_normalized.vcf.gz -- NOT the raw, un-normalized
+      benchmark VCF. See WHOLE_WGS_INPUT's comment below for why: every
+      ground truth was built from the NORMALIZED file, and annotating the
+      raw benchmark instead silently breaks the join on every
+      multi-allelic site.
   This script only READS the slice; an earlier prep step is responsible for
-  producing it (bcftools view / tabix, not this script's job).
+  producing it (slurm/prep_input.sh: bcftools norm -m -any, then bgzip/tabix,
+  then per-chromosome split -- not this script's job).
 
 Resumable: if --out already exists and is non-empty, this exits 0 immediately --
 before importing vepyr, before touching matrix.tsv. Preemption and the 24h cap
@@ -55,7 +60,20 @@ DATA_DIR = os.environ.get("VEPYR_DATA", os.path.expanduser("~/vepyr/data"))
 WORK_DIR = os.environ.get("VEPYR_WORK", os.path.expanduser("~/vepyr/work"))
 
 MATRIX_PATH = os.path.join(WORK_DIR, "matrix.tsv")
-WHOLE_WGS_INPUT = os.path.join(DATA_DIR, "HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz")
+
+#: CRITICAL: this MUST be the NORMALIZED input, never the raw, un-normalized
+#: benchmark VCF. Every ground-truth VCF's `##VEP-command-line=` header says
+#: `--input_file .../HG002_normalized.vcf` -- the raw benchmark AFTER
+#: `bcftools norm -m -any` split its 47,781 multi-allelic sites into one row
+#: per ALT (see slurm/prep_input.sh's header for the record-count proof and
+#: its GATE 1/GATE 2 verification). The diff pipeline joins vepyr output
+#: against ground truth on (chrom, pos, ref, alt); a joint row `C -> T,CCGC`
+#: never matches its split counterparts `C -> T` / `C -> CCGC`. Pointing this
+#: at the raw benchmark instead would silently drop ALL 47,781 multi-allelic
+#: sites from the comparison -- exactly the variants multi-ALT handling is
+#: weakest on, and exactly the ones this pipeline most needs to measure.
+#: tests/test_input_provenance.py guards against this regressing silently.
+WHOLE_WGS_INPUT = os.path.join(DATA_DIR, "HG002_normalized.vcf.gz")
 REFERENCE_FASTA = os.path.join(DATA_DIR, "Homo_sapiens.GRCh38.dna.primary_assembly.fa")
 PLUGIN_CACHE_ROOT = os.path.join(DATA_DIR, "plugin_cache")
 

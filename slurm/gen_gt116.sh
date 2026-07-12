@@ -39,7 +39,18 @@ PY="${VEPYR_PYTHON:-$HOME/vepyr/venv/bin/python3}"
 BCFTOOLS_SIF="${VEPYR_BCFTOOLS_SIF:-$HOME/aidiva-onb/bcftools.sif}"
 VEP_SIF="${VEPYR_VEP116_SIF:-$HOME/bvp/vep116.sif}"
 FASTA="$DATA/Homo_sapiens.GRCh38.dna.primary_assembly.fa"
-WHOLE_WGS_INPUT="$DATA/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz"
+# CRITICAL: the 116 GT must be built from the SAME input the 115 GT was, or
+# the two GTs (and vepyr's output, joined against both) are not comparable to
+# each other. Every GT VCF's `##VEP-command-line=` header says
+# `--input_file .../HG002_normalized.vcf` -- the raw HG002 benchmark AFTER
+# `bcftools norm -m -any` split its 47,781 multi-allelic sites into one row
+# per ALT (see slurm/prep_input.sh's header for the record-count proof and
+# its GATE 1/GATE 2 verification). The join key downstream is
+# (chrom,pos,ref,alt); feeding real VEP the raw benchmark here instead would
+# silently drop every multi-allelic site from the comparison, the same way it
+# would for vepyr -- see bin/run_wgs.py's WHOLE_WGS_INPUT comment for the full
+# explanation. tests/test_input_provenance.py guards against this regressing.
+WHOLE_WGS_INPUT="$DATA/HG002_normalized.vcf.gz"
 
 # shellcheck source=lib_common.sh
 source "$WORK/slurm/lib_common.sh"
