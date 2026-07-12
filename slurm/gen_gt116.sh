@@ -140,10 +140,10 @@ CLEAN=$("$PY" -c '
 import shlex
 import sys
 
-STRIP = {"vep", "--cache", "--offline", "--dir_cache", "--dir", "--input_file", "-i",
+STRIP = {"vep", "--cache", "--offline", "--database", "--dir_cache", "--dir", "--input_file", "-i",
         "--output_file", "-o", "--fasta", "--fa", "--vcf", "--force_overwrite",
         "--force", "--fork"}
-VALUE_FLAGS = {"--dir_cache", "--dir", "--input_file", "-i", "--output_file", "-o",
+VALUE_FLAGS = {"--database", "--dir_cache", "--dir", "--input_file", "-i", "--output_file", "-o",
               "--fasta", "--fa", "--fork"}
 
 toks = shlex.split(sys.argv[1])
