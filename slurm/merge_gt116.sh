@@ -72,12 +72,19 @@ SHARD_FILES=()
 while IFS= read -r f; do
     SHARD_FILES+=("$f")
 done < <(
-    awk -F'\t' -v c="$COMBO" 'NR>1 && $1==c {print $4"\t"$5}' "$SHARDS" \
-        | sort -t$'\t' -k1,1n -k2,2n \
-        | while IFS=$'\t' read -r chrom chunk; do
+    # MUST mirror gen_gt116.sh's SFX construction EXACTLY (lines 93-96):
+    #     SFX=""; [ CHROM != all ] && SFX="_$CHROM"; [ LEVEL = L2 ] && SFX+="_c$CHUNK"
+    # The `_c<chunk>` suffix is appended ONLY for L2. Gating on `-n "$chunk"` instead
+    # was wrong: L1 shards carry chunk=0, which is non-empty, so this looked for
+    # `<combo>_<chrom>_c0.vcf` while gen_gt116 had written `<combo>_<chrom>.vcf`.
+    # That mismatch failed all 8 merge elements. The convention is hand-duplicated
+    # across bash scripts (bash cannot import the Python definition) -- keep them in sync.
+    awk -F'\t' -v c="$COMBO" 'NR>1 && $1==c {print $3"\t"$4"\t"$5}' "$SHARDS" \
+        | sort -t$'\t' -k2,2n -k3,3n \
+        | while IFS=$'\t' read -r level chrom chunk; do
             sfx=""
             [ "$chrom" != "all" ] && sfx="_$chrom"
-            [ -n "$chunk" ] && sfx="${sfx}_c${chunk}"
+            [ "$level" = "L2" ] && sfx="${sfx}_c${chunk}"
             echo "$SHARDDIR/${COMBO}${sfx}.vcf"
           done
 )
