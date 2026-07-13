@@ -165,8 +165,14 @@ load_apptainer() {
     : "${SCRATCH:=/scratch/$USER}"
     export SCRATCH
     export APPTAINER_CACHEDIR="$SCRATCH/.apptainer/cache"
-    export APPTAINER_TMPDIR="$SCRATCH/.apptainer/tmp"
+    # PER-JOB tmpdir. apptainer has no squashfuse here, so it converts the .sif into a
+    # temp SANDBOX on every exec. With a shared tmpdir, concurrent array elements race
+    # extracting the same image into the same tree and die with
+    #   "Unable to access rootfs path .../rootfs-NNNN/..." (exit 127).
+    # Observed once in 120 concurrent GT elements. A per-job tmpdir removes the race.
+    export APPTAINER_TMPDIR="$SCRATCH/.apptainer/tmp/${SLURM_JOB_ID:-$$}_${SLURM_ARRAY_TASK_ID:-0}"
     mkdir -p "$APPTAINER_CACHEDIR" "$APPTAINER_TMPDIR"
+    trap 'rm -rf "$APPTAINER_TMPDIR" 2>/dev/null || true' EXIT
 
     if ! command -v apptainer >/dev/null 2>&1; then
         echo "FATAL: apptainer not on PATH after load_apptainer." >&2
