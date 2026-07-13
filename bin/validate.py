@@ -49,7 +49,15 @@ DATA_DIR = os.environ.get("VEPYR_DATA", os.path.expanduser("~/vepyr/data"))
 WORK_DIR = os.environ.get("VEPYR_WORK", os.path.expanduser("~/vepyr/work"))
 
 MATRIX_PATH = os.path.join(WORK_DIR, "matrix.tsv")
-GT_DIR = os.path.join(DATA_DIR, "ground_truth_vep")
+# The ground truth lives in a DIFFERENT directory per VEP version:
+#   115 -> data/ground_truth_vep/      (shipped with the project)
+#   116 -> data/ground_truth_vep_116/  (minted by slurm/gen_gt116.sh + merge_gt116.sh)
+# Hardcoding the 115 dir made every --version 116 diff report status=no_gt while a
+# perfectly good 116 ground truth sat in the other directory.
+GT_DIRS = {
+    115: os.path.join(DATA_DIR, "ground_truth_vep"),
+    116: os.path.join(DATA_DIR, "ground_truth_vep_116"),
+}
 
 #: The coverage signals printed alongside overall_pct -- a concordance percentage
 #: without these is untrustworthy (see module docstring).
@@ -97,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     row = matrix[args.combo]
     cache = row[f"cache{args.version}"]
-    gt_path = os.path.join(GT_DIR, row[f"gt{args.version}"])
+    gt_path = os.path.join(GT_DIRS[args.version], row[f"gt{args.version}"])
 
     # BEFORE the no_gt short-circuit: an unseeded row is a broken MATRIX, not a
     # missing ground truth, and must not be laundered into a benign-looking
