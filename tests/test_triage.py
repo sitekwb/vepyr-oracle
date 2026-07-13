@@ -37,3 +37,14 @@ def test_rollup_splits_by_feature_kind(tmp_path):
     # Is the HGNC_ID drift RefSeq-specific? That is the whole question for cluster 2.
     assert r["HGNC_ID"]["by_feature_kind"] == {"ENSEMBL": 1, "REFSEQ": 1}
     assert r["Consequence"]["by_feature_kind"] == {"NONE": 1}
+
+
+def test_load_mismatches_tolerates_crlf(tmp_path):
+    """The TSVs on the cluster were written with csv.writer's default CRLF terminator.
+    A trailing \r on the last column made `awk '$10=="vep_only"'` match ZERO rows --
+    a whole cluster silently looked empty. The reader must not inherit that trap."""
+    p = tmp_path / "crlf.tsv"
+    p.write_bytes(TSV.replace("\n", "\r\n").encode())
+    rows = load_mismatches(str(p))
+    assert rows[2]["category"] == "vep_only"          # NOT "vep_only\r"
+    assert field_rollup(rows)["am_class"]["by_category"] == {"vep_only": 1}

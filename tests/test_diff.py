@@ -317,3 +317,13 @@ def test_clean_files_report_zero_duplicate_records(tmp_path):
                    tsv_path=str(tmp_path / "m.tsv"))
     assert s["duplicate_records_vepyr"] == 0
     assert s["duplicate_records_gt"] == 0
+
+
+def test_mismatch_tsv_is_LF_not_CRLF(tmp_path):
+    """csv.writer DEFAULTS to lineterminator="\r\n". CRLF makes the last column parse as
+    `category\r`, so shell tooling (awk/cut) silently sees zero matching rows."""
+    tsv = tmp_path / "m.tsv"
+    diff_files(str(FIX / "vepyr_mini.vcf"), str(FIX / "gt_mini.vcf"),
+               name="c", cache="k", combo_kwargs=COMBO_NO_HGVS, tsv_path=str(tsv))
+    raw = tsv.read_bytes()
+    assert b"\r\n" not in raw, "mismatches TSV must be LF-terminated, not CRLF"

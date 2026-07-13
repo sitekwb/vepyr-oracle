@@ -178,7 +178,11 @@ def diff_files(vepyr_vcf: str, gt_vcf: str, *, name: str, cache: str,
     kw = {k: v for k, v in (("rel_tol", rel_tol), ("abs_tol", abs_tol)) if v is not None}
 
     with open(tsv_path, "w", newline="") as tsv_file:
-        writer = csv.writer(tsv_file, delimiter="\t")
+        # lineterminator="\n" -- csv.writer DEFAULTS to "\r\n". CRLF makes the last
+        # column parse as `vep_only\r`, so a naive `awk -F'\t' '$10=="vep_only"'` matches
+        # ZERO rows and a whole drift cluster silently looks empty. Exactly the
+        # silent-wrongness this project exists to eliminate.
+        writer = csv.writer(tsv_file, delimiter="\t", lineterminator="\n")
         writer.writerow(TSV_HEADER)
 
         vg = _checked(_grouped(_reader(vepyr_vcf, vf, v_feat, v_allele, cf, v_stats),
