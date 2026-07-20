@@ -27,7 +27,14 @@ _SUFFIXES: Final[dict[str, str]] = {
     "hgvs_refseq":                  "_hgvs_refseq",
 }
 
-_MD5_RE: Final[re.Pattern[str]] = re.compile(r"^([0-9a-f]{32}) [ *](.+)$")
+_HEX32: Final[str] = r"[0-9a-f]{32}"
+
+#: `[ *]`: `md5sum` text mode separates digest and name with two plain spaces;
+#: `md5sum -b` (binary mode) writes a space then an asterisk instead. Both are
+#: legitimate input to parse; only the two-space form is ever produced (see
+#: format_md5_manifest).
+_MD5_RE: Final[re.Pattern[str]] = re.compile(rf"^({_HEX32}) [ *](.+)$")
+_MD5_DIGEST_RE: Final[re.Pattern[str]] = re.compile(rf"^{_HEX32}$")
 
 
 def drive_filename(combo: str, *, compressed: bool = True) -> str:
@@ -58,7 +65,18 @@ def format_md5_manifest(entries: list[tuple[str, str]]) -> str:
 
     Separator to DWIE spacje (tryb tekstowy). Jedna spacja powoduje
     `no properly formatted checksum lines found` po stronie odbiorcy.
+
+    Raises:
+        ValueError: gdy ktorykolwiek `digest` nie jest 32-znakowym malym hexem.
+            Walidacja tutaj, a nie tylko w `parse_md5_manifest`: inaczej blad
+            wolajacego (pusty string, obciety hash, wielkie litery) ujawnia sie
+            dopiero u odbiorcy, przy `md5sum -c`.
     """
+    for digest, name in entries:
+        if not _MD5_DIGEST_RE.match(digest):
+            raise ValueError(
+                f"malformed md5 digest {digest!r} for {name!r}: expected 32 "
+                f"lowercase hex characters")
     return "".join(f"{digest}  {name}\n" for digest, name in entries)
 
 

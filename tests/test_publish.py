@@ -1,7 +1,9 @@
 """Testy mapowania nazw i manifestu dla publikacji GT na Drive."""
 import pytest
 
-from oracle.publish import drive_filename, parse_md5_manifest, format_md5_manifest
+from oracle.publish import (
+    drive_filename, parse_md5_manifest, format_md5_manifest, _SUFFIXES,
+)
 
 
 class TestDriveFilename:
@@ -41,6 +43,15 @@ class TestDriveFilename:
         assert drive_filename("hgvs_merged", compressed=False) == \
             "HG002_annotated_wgs_everything_hgvs_merged.vcf"
 
+    def test_every_matrix_combo_has_a_drive_filename(self):
+        """_SUFFIXES jest CELOWO jawna tabela (dajaca sie sprawdzic wzrokiem), a nie
+        wyprowadzeniem z COMBOS. Cena za to jest ryzyko rozjazdu, gdy COMBOS urosnie
+        -- ten test jest zaplata: nowy combo bez wpisu tutaj wywala sie TERAZ, a nie
+        dopiero przy publikacji, gdy ktos zauwazy brakujacy plik."""
+        from oracle.matrix import COMBOS
+        missing = {c.name for c in COMBOS} - set(_SUFFIXES)
+        assert not missing, f"combos bez nazwy pliku na Drive: {sorted(missing)}"
+
 
 class TestMd5Manifest:
     """Manifest musi byc czytelny przez `md5sum -c` po stronie Marka."""
@@ -65,3 +76,15 @@ class TestMd5Manifest:
         """Obciety md5 to uszkodzony manifest -- ma krzyknac, nie przejsc dalej."""
         with pytest.raises(ValueError, match="malformed"):
             parse_md5_manifest("d41d8cd9  a.vcf.gz\n")
+
+    def test_format_rejects_a_digest_that_is_not_32_hex_chars(self):
+        """Walidacja po stronie zapisu, nie tylko odczytu -- inaczej blad wolajacego
+        ujawnia sie dopiero u odbiorcy, przy `md5sum -c`."""
+        with pytest.raises(ValueError, match="malformed"):
+            format_md5_manifest([("d41d8cd9", "a.vcf.gz")])
+
+    def test_parse_skips_blank_lines(self):
+        text = ("d41d8cd98f00b204e9800998ecf8427e  a.vcf.gz\n"
+                "\n"
+                "0cc175b9c0f1b6a831c399e269772661  b.vcf.gz\n")
+        assert len(parse_md5_manifest(text)) == 2
