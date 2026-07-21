@@ -98,16 +98,20 @@ class Combo:
     drift this module was rewritten to eliminate (see the module docstring).
     """
     name: str
-    cache_flavor: str          # "merged" | "refseq" -- which CACHE, not which flags
+    cache_flavor: str          # "ensembl" | "merged" | "refseq" -- which CACHE, not which flags
     gt115: str                 # filename inside data/ground_truth_vep/
 
 
+_E = "HG002_annotated_wgs_everything"
 _G = "HG002_annotated_wgs_everything_hgvs"
 
-#: merged+refseq only. The two `everything*` combos are ensembl and are OUT OF SCOPE.
+#: 10 combos: the two `everything*` are ensembl (VEP's default cache -- no
+#: `--merged`/`--refseq` flag at all); the other 8 are merged/refseq.
 #: NOTE `hgvs_merged_pick`'s NAME is a historical misnomer: its ground truth was in
 #: fact generated with --flag_pick_allele_gene. The header is the truth, not the name.
 COMBOS: list[Combo] = [
+    Combo("everything",                   "ensembl", f"{_E}.vcf"),
+    Combo("everything_hgvs",              "ensembl", f"{_E}_hgvs.vcf"),
     Combo("hgvs_merged",                  "merged", f"{_G}_merged.vcf"),
     Combo("hgvs_merged_am",               "merged", f"{_G}_merged_am.vcf"),
     Combo("hgvs_merged_pick",             "merged", f"{_G}_merged_pick.vcf"),
@@ -249,12 +253,16 @@ def vep_flags_to_vepyr_kwargs(vep_command_line: str, *, combo: str = "<unknown>"
         vep_command_line: the value of the GT VCF's `##VEP-command-line=` header,
             with or without its leading program token (`vep`, `./vep`, ...).
         combo: the combo's name -- used only to make failures nameable.
-        cache_flavor: the combo's declared cache flavor ("merged" | "refseq"). When
-            given, the command line's own `--merged`/`--refseq` MUST agree with it,
-            otherwise the ground truth was built against a different cache than the
-            one we annotate with, and every "missing transcript" downstream is an
-            artefact of that mismatch. `None` skips the cross-check (parsing a
-            command line that belongs to no combo).
+        cache_flavor: the combo's declared cache flavor ("ensembl" | "merged" |
+            "refseq"). When given, it is cross-checked against the command line's
+            own `--merged`/`--refseq`: neither flag present resolves to "ensembl"
+            (VEP's default cache when no flavor flag is given), exactly one of them
+            resolves to that flavor, and both together is always a hard error (a
+            command line cannot select two caches at once). The resolved flavor
+            MUST agree with `cache_flavor`, otherwise the ground truth was built
+            against a different cache than the one we annotate with, and every
+            "missing transcript" downstream is an artefact of that mismatch. `None`
+            skips the cross-check (parsing a command line that belongs to no combo).
 
     Returns:
         kwargs suitable for `vepyr.annotate(**kwargs)`, possibly carrying the
@@ -318,14 +326,19 @@ def vep_flags_to_vepyr_kwargs(vep_command_line: str, *, combo: str = "<unknown>"
                 f"I/O or the environment.")
 
     if cache_flavor is not None:
-        if declared_flavor is None:
-            raise ValueError(
-                f"combo {combo!r}: the recovered VEP command line specifies neither "
-                f"--merged nor --refseq, so its ground truth was built against the "
-                f"plain Ensembl cache -- but the combo declares cache_flavor="
-                f"{cache_flavor!r}. Annotating against a different cache than the "
-                f"ground truth used makes every transcript difference meaningless.")
-        if declared_flavor != cache_flavor:
+        # Neither --merged nor --refseq means VEP ran against its DEFAULT cache,
+        # i.e. ensembl -- that is a resolved flavor, not a missing one. `declared_
+        # flavor is not None` (exactly one of --merged/--refseq) is unchanged from
+        # before; both together already raised above, in the parsing loop.
+        resolved_flavor = declared_flavor if declared_flavor is not None else "ensembl"
+        if resolved_flavor != cache_flavor:
+            if declared_flavor is None:
+                raise ValueError(
+                    f"combo {combo!r}: the recovered VEP command line specifies neither "
+                    f"--merged nor --refseq, so its ground truth was built against the "
+                    f"plain Ensembl cache -- but the combo declares cache_flavor="
+                    f"{cache_flavor!r}. Annotating against a different cache than the "
+                    f"ground truth used makes every transcript difference meaningless.")
             raise ValueError(
                 f"combo {combo!r}: the recovered VEP command line says --{declared_flavor} "
                 f"but the combo declares cache_flavor={cache_flavor!r}. The ground truth "

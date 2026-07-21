@@ -48,6 +48,10 @@ _PICK_ORDER = "--pick_order biotype,rank,mane_select,tsl,canonical,appris,ccds,l
 PICK_ORDER = "biotype,rank,mane_select,tsl,canonical,appris,ccds,length"
 
 REAL_CMDLINES: dict[str, str] = {
+    "everything":
+        f"vep --everything {_IO}",
+    "everything_hgvs":
+        f"vep --everything --hgvs {_IO}",
     "hgvs_merged":
         f"vep --everything --hgvs --merged {_IO}",
     "hgvs_merged_am":
@@ -71,6 +75,10 @@ REAL_CMDLINES: dict[str, str] = {
 
 #: the kwargs each real command line MUST derive to, spelled out in full
 EXPECTED_KWARGS: dict[str, dict] = {
+    "everything":
+        dict(everything=True),
+    "everything_hgvs":
+        dict(everything=True, hgvs=True),
     "hgvs_merged":
         dict(everything=True, hgvs=True),
     "hgvs_merged_am":
@@ -101,10 +109,12 @@ def _derive(combo_name: str) -> dict:
 
 # --- COMBOS: identity only, never semantics ---------------------------------
 
-def test_eight_in_scope_combos_merged_and_refseq_only():
-    assert len(COMBOS) == 8
-    assert {c.cache_flavor for c in COMBOS} == {"merged", "refseq"}
+def test_ten_in_scope_combos_ensembl_merged_and_refseq():
+    assert len(COMBOS) == 10
+    assert {c.cache_flavor for c in COMBOS} == {"ensembl", "merged", "refseq"}
     assert "hgvs_merged_flag_pick_allele" in {c.name for c in COMBOS}
+    assert "everything" in {c.name for c in COMBOS}
+    assert "everything_hgvs" in {c.name for c in COMBOS}
 
 
 def test_combos_carry_no_hand_written_kwargs():
@@ -319,7 +329,7 @@ def test_matrix_roundtrip(tmp_path):
     p = tmp_path / "matrix.tsv"
     write_matrix(str(p), REAL_CMDLINES)
     rows = load_matrix(str(p))
-    assert len(rows) == 8
+    assert len(rows) == 10
     r = rows["hgvs_merged_pick"]
     assert r["cache115"] == "115_GRCh38_merged"
     assert r["cache116"] == "116_GRCh38_merged"
