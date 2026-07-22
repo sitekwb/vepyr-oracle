@@ -124,12 +124,33 @@ def main(argv: list[str] | None = None) -> int:
                     help="the chromosome set the shards MUST cover exactly "
                          "(default: the 22 autosomes)")
     ap.add_argument("-o", "--out", help="default: <resultsdir>/summary.json")
+    ap.add_argument("--combos", default=None,
+                    help="comma-separated subset of oracle.matrix.COMBOS to require and "
+                         "merge (default: ALL combos). The completeness contract then "
+                         "applies over exactly this subset -- for a gate that deliberately "
+                         "runs fewer than every combo (e.g. a chr22 matrix over the combos "
+                         "whose caches are present). Names outside COMBOS are rejected.")
     args = ap.parse_args(argv)
 
     out_path = args.out or os.path.join(args.resultsdir, "summary.json")
     by_combo = load_shards(args.resultsdir)
 
     known = {c.name for c in COMBOS}
+
+    # `wanted` = the combos whose completeness we require and merge. Default is every
+    # combo (whole-genome report contract); --combos restricts it to a caller-chosen
+    # subset, so a gate running a subset does not trip the "combo omitted" FATAL.
+    if args.combos is None:
+        wanted = list(COMBOS)
+    else:
+        requested = [c.strip() for c in args.combos.split(",") if c.strip()]
+        bad = sorted(set(requested) - known)
+        if bad:
+            print(f"[FATAL] --combos names {bad} not in oracle.matrix.COMBOS "
+                  f"(known: {sorted(known)}).", file=sys.stderr)
+            return 2
+        wanted = [c for c in COMBOS if c.name in set(requested)]
+
     unknown = sorted(set(by_combo) - known)
     if unknown:
         print(f"[FATAL] {args.resultsdir} holds summaries for combo(s) {unknown} that are "
@@ -138,16 +159,17 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 2
 
-    missing = [c.name for c in COMBOS if c.name not in by_combo]
+    missing = [c.name for c in wanted if c.name not in by_combo]
     if missing:
         print(f"[FATAL] no shard summaries at all for combo(s) {missing} in "
-              f"{args.resultsdir}. A whole-genome report must not silently omit a combo: "
-              f"run bin/validate.py for them, or delete them from oracle.matrix.COMBOS.",
+              f"{args.resultsdir}. A report must not silently omit a required combo: "
+              f"run bin/validate.py for them, restrict with --combos, or delete them "
+              f"from oracle.matrix.COMBOS.",
               file=sys.stderr)
         return 2
 
     merged = []
-    for combo in COMBOS:
+    for combo in wanted:
         summary = merge_combo(combo.name, by_combo[combo.name], args.chroms)
         merged.append(summary)
         cov = coverage(summary)

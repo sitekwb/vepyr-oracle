@@ -92,6 +92,46 @@ def test_merge_writes_a_list_of_per_combo_whole_genome_summaries(tmp_path):
     assert "overall_pct=" in r.stdout and "join_rate=" in r.stdout
 
 
+def _seed_subset(dirpath, names, chrom="22") -> None:
+    """Seed shard JSONs for ONLY the named combos (a gate running a subset)."""
+    os.makedirs(dirpath, exist_ok=True)
+    by_name = {c.name: c for c in COMBOS}
+    for name in names:
+        combo = by_name[name]
+        shard = _shard(name, f"115_GRCh38_{combo.cache_flavor}", chrom)
+        with open(os.path.join(dirpath, f"summary_{name}_{chrom}.json"), "w") as fh:
+            json.dump(shard, fh)
+
+
+def test_merge_combos_subset_requires_only_the_subset(tmp_path):
+    """--combos restricts the completeness contract to the named subset, so a gate
+    that ran fewer than every combo does not trip the 'combo omitted' FATAL."""
+    results = tmp_path / "results"
+    _seed_subset(str(results), ["hgvs_merged", "hgvs_refseq"])
+    r = _run([MERGE, str(results), "--chroms", "22",
+              "--combos", "hgvs_merged,hgvs_refseq"])
+    assert r.returncode == 0, r.stderr
+    merged = json.loads((results / "summary.json").read_text())
+    assert [s["name"] for s in merged] == ["hgvs_merged", "hgvs_refseq"]
+
+
+def test_merge_without_combos_still_requires_all(tmp_path):
+    """Default (no --combos) keeps the whole-genome contract: a subset dir FATALs."""
+    results = tmp_path / "results"
+    _seed_subset(str(results), ["hgvs_merged", "hgvs_refseq"])
+    r = _run([MERGE, str(results), "--chroms", "22"])
+    assert r.returncode == 2
+    assert "no shard summaries" in r.stderr
+
+
+def test_merge_combos_rejects_unknown_name(tmp_path):
+    results = tmp_path / "results"
+    _seed_subset(str(results), ["hgvs_merged"])
+    r = _run([MERGE, str(results), "--chroms", "22", "--combos", "hgvs_merged,nonsuch"])
+    assert r.returncode == 2
+    assert "not in oracle.matrix.COMBOS" in r.stderr
+
+
 def test_merge_refuses_to_publish_a_whole_genome_number_from_21_chromosomes(tmp_path):
     """expected_chroms is the whole point: a dead chromosome's missing shard must NOT
     silently yield a 'whole-genome' number computed from the survivors."""
