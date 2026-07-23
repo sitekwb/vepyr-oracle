@@ -87,7 +87,11 @@ if [ ! -d "$CACHE" ]; then
     exit 1
 fi
 
-OUTDIR="$DATA/ground_truth_vep_116/shards"
+# VEPYR_GT116_DIR wybiera drzewo wyjsciowe. Default = katalog FORKED (zero zmian
+# dla istniejacych wywolan). Regeneracja unforked ustawia je na
+# $DATA/ground_truth_vep_116_unforked, dzieki czemu forkowany baseline zostaje
+# nietkniety (jest potrzebny bramce fork-delta w Tasku 9 jako punkt odniesienia).
+OUTDIR="${VEPYR_GT116_DIR:-$DATA/ground_truth_vep_116}/shards"
 mkdir -p "$OUTDIR"
 
 SFX=""

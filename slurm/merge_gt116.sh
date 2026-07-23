@@ -44,8 +44,13 @@ BCFTOOLS_SIF="${VEPYR_BCFTOOLS_SIF:-$HOME/aidiva-onb/bcftools.sif}"
 
 MATRIX="$WORK/matrix.tsv"
 SHARDS="$WORK/shards_gt.tsv"
-SHARDDIR="$DATA/ground_truth_vep_116/shards"
-OUTDIR="$DATA/ground_truth_vep_116"
+# VEPYR_GT116_DIR wybiera drzewo GT (shardy IN + scalony VCF OUT). Default =
+# katalog FORKED (zero zmian dla istniejacych wywolan). MUSI zgadzac sie z
+# gen_gt116.sh -- ten sam override kieruje generacje i scalanie w to samo drzewo.
+# Regeneracja unforked: VEPYR_GT116_DIR=$DATA/ground_truth_vep_116_unforked.
+GT116_DIR="${VEPYR_GT116_DIR:-$DATA/ground_truth_vep_116}"
+SHARDDIR="$GT116_DIR/shards"
+OUTDIR="$GT116_DIR"
 mkdir -p "$OUTDIR"
 
 TASK_ID="${SLURM_ARRAY_TASK_ID:?must run under a SLURM array}"
