@@ -69,6 +69,7 @@ import csv
 import math
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Final
 
 #: The target band: split anything projected to run longer than BAND_HI_H, aim for
 #: TARGET_H once splitting. BAND_LO_H is not a splitting threshold by itself (a
@@ -91,6 +92,15 @@ TARGET_H = 14.0
 #: this direction is a few extra concurrent array elements; the cost of being wrong
 #: in the other direction is a killed job and a lost day.
 DEFAULT_SAFETY_FACTOR = 1.4
+
+#: sekundy/wariant dla real VEP 116 BEZ --fork (jeden watek). Pomiar Z `--fork 16`
+#: dawal ~0.0031 s/wariant; unforked jest ~16x wolniejszy (fork rownolegli po
+#: wariantach), stad 0.0031 * 16 ~= 0.0496. To jest kanoniczna stawka, ktora
+#: bin/plan_shards.py planuje pod GT 116 unforked -- podana jako `rate=unforked`.
+#: Zanizona stawka => za male est_hours => plan_combo() sklada caly genom w jeden
+#: shard L0 (whole_hours <= BAND_HI_H), a unforked whole-genome job (~57h) zostaje
+#: UBITY na 23h wall-time. Ta stawka wymusza sharding per-chromosom (kazdy <=~6.2h).
+VEP_SECONDS_PER_VARIANT_UNFORKED: Final[float] = 0.0496
 
 
 class Level(StrEnum):

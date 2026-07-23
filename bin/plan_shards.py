@@ -5,8 +5,10 @@ Usage:
   plan_shards.py <step: gt|annotate|diff> <rate> <chrom_counts.tsv> <out shards.tsv>
                  [--safety-factor F]
 
-`<rate>` is EITHER a single measured `sec_per_variant` (a float, applied to every
-combo) OR a path to a per-combo rates TSV with `combo` + `sec_per_variant` columns.
+`<rate>` is EITHER the literal `unforked` (the canonical VEP-116-without-fork rate,
+oracle.shards.VEP_SECONDS_PER_VARIANT_UNFORKED) OR a single measured `sec_per_variant`
+(a float, applied to every combo) OR a path to a per-combo rates TSV with
+`combo` + `sec_per_variant` columns.
 Prefer the TSV: one global rate does not transfer across combos -- `hgvs_merged_am`
 runs the AlphaMissense plugin and `hgvs_refseq` does not, so they do not cost the
 same per variant. A rates TSV that is MISSING a combo is a hard error, never a
@@ -39,7 +41,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from oracle.matrix import COMBOS
-from oracle.shards import (BAND_HI_H, BAND_LO_H, DEFAULT_SAFETY_FACTOR, Step, WalltimeError,
+from oracle.shards import (BAND_HI_H, BAND_LO_H, DEFAULT_SAFETY_FACTOR,
+                           VEP_SECONDS_PER_VARIANT_UNFORKED, Step, WalltimeError,
                            plan_all, write_shards)
 
 
@@ -60,15 +63,25 @@ def _read_chrom_counts(path: str) -> dict[str, int]:
 
 
 def _read_rate(arg: str) -> float | dict[str, float]:
-    """A bare float, or a path to a per-combo rates TSV (`combo`, `sec_per_variant`)."""
+    """A named canonical rate, a bare float, or a per-combo rates TSV path.
+
+    The symbolic name ``unforked`` resolves to the canonical measured rate for real
+    VEP 116 run WITHOUT --fork (oracle.shards.VEP_SECONDS_PER_VARIANT_UNFORKED). That
+    keeps the magic number in ONE place -- the source constant, with its derivation --
+    instead of retyped on the command line, where a mistyped digit would silently
+    mis-provision the whole 116 GT plan (too low => plan_combo() folds the genome into
+    one L0 shard that is then killed at the 23h wall-time).
+    """
+    if arg == "unforked":
+        return VEP_SECONDS_PER_VARIANT_UNFORKED
     try:
         return float(arg)
     except ValueError:
         pass
     if not os.path.exists(arg):
         raise ValueError(
-            f"rate {arg!r} is neither a number nor an existing per-combo rates TSV "
-            f"(needs `combo` + `sec_per_variant` columns)"
+            f"rate {arg!r} is neither 'unforked', a number, nor an existing per-combo "
+            f"rates TSV (needs `combo` + `sec_per_variant` columns)"
         )
     rows = _read_tsv(arg, {"combo", "sec_per_variant"})
     return {r["combo"]: float(r["sec_per_variant"]) for r in rows}
@@ -81,7 +94,9 @@ def main(argv: list[str] | None = None) -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument("step", choices=[s.value for s in Step])
-    ap.add_argument("rate", help="measured sec_per_variant (float), OR a per-combo rates TSV")
+    ap.add_argument("rate", help="'unforked' (canonical VEP-116-without-fork rate), "
+                                 "OR a measured sec_per_variant (float), "
+                                 "OR a per-combo rates TSV")
     ap.add_argument("chrom_counts", help="TSV with `chrom` + `n_variants` columns")
     ap.add_argument("out", help="output shards.tsv")
     ap.add_argument("--safety-factor", type=float, default=DEFAULT_SAFETY_FACTOR,

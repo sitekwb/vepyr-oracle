@@ -185,12 +185,20 @@ echo "[gen_gt116] combo=$COMBO level=$LEVEL chrom=$CHROM chunk=$CHUNK" \
      "est_hours=$EST_HOURS cache=$CACHE input=$INPUT -> $OUT"
 echo "[gen_gt116] flags (cleaned): $CLEAN"
 
+# BEZ --fork. Ground truth 115.2 byl generowany unforked, a fork ZMIENIA wynik:
+# back-fill HGNC jest buffer-scoped (maxForkSize = buffer_size/(2*fork)), wiec
+# `--fork 16` zmniejsza okno InputBuffer ~32x i transkrypt-dawca HGNC wypada poza
+# nie. Zmierzone: fork psuje WYLACZNIE HGNC_ID (0 roznic na 9 360 pozostalych
+# komorek), ale GT musi byc metodologicznie identyczny z 115.2, wiec forka nie ma.
+# Koszt: ~16x dluzej na shard (unforked = jeden watek). Dlatego shardujemy po
+# chromosomach (shards_gt.tsv, zaplanowane rate'em unforked ~0.0496 s/wariant) tak,
+# by kazdy element zmiescil sie w #SBATCH --time=23h pod 24h HARD capem klastra.
 # shellcheck disable=SC2086  # $CLEAN is a shlex.join()-quoted flag list -- word
 # splitting it is the point, and each flag's own quoting survives the split.
 apptainer exec -B "$DATA:$DATA" -B "$WORK:$WORK" "${PLUGIN_BIND[@]}" "$VEP_SIF" \
     vep --cache --offline --dir_cache "$CACHE" --fasta "$FASTA" \
         --input_file "$INPUT" --output_file "$OUT_TMP" \
-        --vcf --force_overwrite --fork 16 $CLEAN
+        --vcf --force_overwrite $CLEAN
 
 # Post-run sanity (design doc's verification gate): a valid GT shard must
 # carry a CSQ header and at least one non-header record -- an empty or
