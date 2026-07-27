@@ -194,18 +194,19 @@ def fork_delta_section(summary_path: str) -> list[str]:
     out = [
         "## ⚠️ Dlaczego istnieje `v2-unforked` i czym rozni sie od `v1-forked`",
         "",
-        "`v1-forked/` (dostawa z 2026-07-20) powstala z `--fork 16`. Back-fill symbolu",
+        "`v1-forked/` (dostawa z 2026-07-21) powstala z `--fork 16`. Back-fill symbolu",
         "genu w VEP jest **buffer-scoped**: okno `InputBuffer` widziane przez jeden proces",
         "to `buffer_size / (2 * fork)`, wiec `--fork 16` zwezalo je ~32x i transkrypt-dawca",
         "wypadal poza nie. Ta dostawa (`v2-unforked/`) zostala wygenerowana **bez `--fork`**",
         "i jest wersja **autorytatywna**.",
         "",
         "Roznica miedzy armami zostala zmierzona na **calym genomie**, nie na probce:",
-        f"{len(rows)} wspolnych combos (8 z 10 -- `everything` i `everything_hgvs` istnieja",
-        "tylko w v2, wiec nie maja odpowiednika do porownania), chr1-22, "
-        f"**{_fmt(total_cells)} porownanych komorek CSQ**.",
+        f"wszystkie {len(rows)} combos wspolne dla obu armow (`everything` i",
+        "`everything_hgvs` istnieja tylko w v2, wiec nie maja z czym byc porownane),",
+        f"chr1-22, **{_fmt(total_cells)} porownanych komorek CSQ**.",
         "",
-        f"Wynik: **{_fmt(moved_total)} komorek sie rozni = {pct:.6f}%**, i sa one",
+        f"Wynik: **{_fmt(moved_total)} komorek sie rozni = "
+        f"{f'{pct:.6f}'.replace('.', ',')}%**, i sa one",
         f"skupione w dokladnie {len(per_field_totals)} polach:",
         "",
         "| pole | komorek roznych | z ilu | co to znaczy |",
@@ -271,7 +272,7 @@ def fork_delta_section(summary_path: str) -> list[str]:
         "",
         "### Czego fork NIE ruszyl",
         "",
-        "**Zero** roznicych komorek w: `Consequence`, `IMPACT`, `HGVSc`, `HGVSp`, `SIFT`,",
+        "**Zero** rozniacych sie komorek w: `Consequence`, `IMPACT`, `HGVSc`, `HGVSp`, `SIFT`,",
         "`PolyPhen`, `SYMBOL`, `Gene`, `Feature`, `CANONICAL`/`MANE*`/`TSL`/`APPRIS`/`PICK`,",
         "wszystkich czestosciach gnomAD i 1000G oraz obu polach AlphaMissense.",
         "**Wyliczanie konsekwencji jest niewrazliwe na `--fork`.**",
@@ -291,7 +292,7 @@ def fork_delta_section(summary_path: str) -> list[str]:
         "",
         "Niezalezna kontrola: porownanie obu armow jako surowego TEKSTU (poza naglowkami,",
         "wiec obejmujace takze QUAL, FILTER, pozostale klucze INFO i kolumny FORMAT/sample,",
-        "ktorych parser CSQ nie widzi) daje dla `hgvs_refseq` **0** roznicych wierszy z",
+        "ktorych parser CSQ nie widzi) daje dla `hgvs_refseq` **0** rozniacych sie wierszy z",
         "4 096 123, a dla `hgvs_merged` -- 40 267 wierszy, z ktorych po usunieciu tokenow",
         "`HGNC:` zostaja **2**: dokladnie te dwa loci `DOMAINS`. Czyli `HGNC_ID` plus te",
         "dwa loci wyjasniaja **100%** roznicy bajtowej miedzy armami.",
@@ -387,6 +388,15 @@ def main() -> int:
         print(f"[FATAL] brakuje opublikowanych plikow: {missing}", file=sys.stderr)
         return 1
 
+    if unforked:
+        new_names = [drive_filename(c) for c in ("everything", "everything_hgvs")]
+        lines += [
+            "",
+            f"**Nowe wzgledem `v1-forked/`:** `{new_names[0]}` i `{new_names[1]}` -- oba na",
+            "**czystym cache'u Ensembl** (bez `--merged` i bez `--refseq`, czyli cache domyslny",
+            "VEP-a). Pozostale 8 plikow ma odpowiednik w `v1-forked/` pod ta sama nazwa.",
+        ]
+
     lines += [
         "",
         "> **Flagi wyzej to flagi SEMANTYCZNE**, odzyskane z naglowka `##VEP-command-line=`",
@@ -403,7 +413,7 @@ def main() -> int:
         "> wszystkie i tylko jeden oznacza). Nazwa jest historyczna i celowo jej NIE zmieniamy,",
         "> zeby nie zerwac ciaglosci z folderem `115.2/`; udokumentowane rowniez w",
         "> `oracle/matrix.py`. To samo dotyczy `..._pick_allele` / `..._pick_allele_gene` /",
-        "> `..._per_gene`: wszystkie pieciu combos z rodziny pick dostaly jawny, NIEDOMYSLNY",
+        "> `..._per_gene`: wszystkie piec combos z rodziny pick dostalo jawny, NIEDOMYSLNY",
         "> `--pick_order biotype,rank,mane_select,tsl,canonical,appris,ccds,length`.",
         "",
     ]
