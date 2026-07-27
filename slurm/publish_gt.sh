@@ -47,9 +47,16 @@ GT_DIR="${GT116_DIR:-$DATA/ground_truth_vep_116}"
 OUT_DIR="${PUBLISH_DIR:-$DATA/publish_gt116}"
 mkdir -p "$OUT_DIR"
 
+# Kolejnosc: pierwsze OSIEM to combos arma forked (v1), w tej samej kolejnosci co
+# przy publikacji v1-forked. `everything` i `everything_hgvs` sa DOPISANE NA KONCU,
+# a nie wstawione alfabetycznie/na poczatek: indeks arraya -> combo jest jedynym
+# identyfikatorem w logach `pubgt116-<jobid>_<idx>.out`, wiec przestawienie 1-8
+# sprawiloby, ze log v1 i log v2 o tym samym indeksie dotycza roznych plikow.
+# Arm unforked (v2) ma 10 combos -> `--array=1-10`; arm forked mial 8 -> `--array=1-8`.
 COMBOS=(hgvs_merged hgvs_merged_am hgvs_merged_pick hgvs_merged_pick_allele
         hgvs_merged_pick_allele_gene hgvs_merged_per_gene
-        hgvs_merged_flag_pick_allele hgvs_refseq)
+        hgvs_merged_flag_pick_allele hgvs_refseq
+        everything everything_hgvs)
 
 IDX="${SLURM_ARRAY_TASK_ID:?must run under a SLURM array}"
 # Jawny check granic, NIE ${COMBOS[IDX-1]:?...}: bash 5.2 na wezle (zweryfikowane)
