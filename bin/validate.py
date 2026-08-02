@@ -50,13 +50,28 @@ WORK_DIR = os.environ.get("VEPYR_WORK", os.path.expanduser("~/vepyr/work"))
 
 MATRIX_PATH = os.path.join(WORK_DIR, "matrix.tsv")
 # The ground truth lives in a DIFFERENT directory per VEP version:
-#   115 -> data/ground_truth_vep/      (shipped with the project)
-#   116 -> data/ground_truth_vep_116/  (minted by slurm/gen_gt116.sh + merge_gt116.sh)
+#   115 -> data/ground_truth_vep/                (shipped with the project)
+#   116 -> data/ground_truth_vep_116_unforked/    (minted by slurm/gen_gt116.sh +
+#                                                  merge_gt116.sh with VEPYR_GT116_DIR
+#                                                  pointed at the _unforked tree)
 # Hardcoding the 115 dir made every --version 116 diff report status=no_gt while a
 # perfectly good 116 ground truth sat in the other directory.
+#
+# 2026-07-30/2026-08-02: the 116 entry used to be plain "ground_truth_vep_116" --
+# ground truth minted with `--fork N>1`. That tree was deleted on 2026-07-30,
+# correctly: forking shrinks VEP's InputBuffer (maxForkSize = buffer_size /
+# (2 * fork)), so `--fork 16` narrows the annotation buffer window ~30x and the
+# gene-symbol back-fill drops HGNC_ID for transcripts that fall outside it -- see
+# bin/fork_delta.py's module docstring for the whole-genome measurement of that
+# effect. It was never a valid golden standard. The path here was not moved when
+# the directory was, so every --version 116 run has been silently taking the
+# no_gt branch below since 2026-07-30 instead of measuring anything -- a gap that
+# went unnoticed because a no_gt summary reads, downstream, as "nothing to
+# report" rather than "nothing was measured". Now points at the authoritative,
+# unforked ground truth.
 GT_DIRS = {
     115: os.path.join(DATA_DIR, "ground_truth_vep"),
-    116: os.path.join(DATA_DIR, "ground_truth_vep_116"),
+    116: os.path.join(DATA_DIR, "ground_truth_vep_116_unforked"),
 }
 
 #: The coverage signals printed alongside overall_pct -- a concordance percentage

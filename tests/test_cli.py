@@ -230,3 +230,41 @@ def test_validate_unknown_combo_exits_nonzero_with_a_clear_message(tmp_path):
                   "--vepyr", "/nonexistent.vcf", "--outdir", str(tmp_path / "out")], env=env)
     assert result.returncode != 0
     assert "does_not_exist" in result.stderr
+
+
+# --- GT_DIRS: version -> ground-truth-directory map --------------------------
+#
+# ground_truth_vep_116 was ground truth minted with `--fork N>1`; deleted 2026-07-30
+# because forking narrows the annotation buffer window ~30x and drops HGNC_ID, so it
+# was never a valid standard (see bin/validate.py's GT_DIRS comment). The
+# replacement, ground_truth_vep_116_unforked, sits beside it under the same
+# DATA_DIR. Unlike the CLI-behaviour tests above, this pins the DICT ITSELF (not
+# just an observable exit code / stdout line), so a future edit that repoints
+# GT_DIRS at a deleted or forked directory fails loudly here instead of silently
+# producing status=no_gt summaries for every run, as actually happened from
+# 2026-07-30 until this fix.
+
+def _load_validate():
+    """bin/validate.py as a module (it is a script, not a package member) -- same
+    load-by-path mechanism as _load_make_report() in test_report_cli.py."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_validate", VALIDATE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_gt_dirs_116_points_at_the_unforked_ground_truth(monkeypatch, tmp_path):
+    # VEPYR_DATA must be set BEFORE the module executes -- DATA_DIR/GT_DIRS are
+    # computed at module-exec time, same as every other CLI in bin/.
+    monkeypatch.setenv("VEPYR_DATA", str(tmp_path))
+    mod = _load_validate()
+
+    assert mod.GT_DIRS[116].endswith("ground_truth_vep_116_unforked")
+    # Positive control: 115 must be untouched -- proves the fix moved exactly one
+    # path, not both.
+    assert mod.GT_DIRS[115] == os.path.join(mod.DATA_DIR, "ground_truth_vep")
+    # DATA_DIR must still be driven by VEPYR_DATA -- the hook a containerised
+    # runner uses to point the oracle at its own data directory, unrelated to
+    # this fix and must survive it.
+    assert mod.DATA_DIR == str(tmp_path)
