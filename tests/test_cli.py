@@ -268,3 +268,79 @@ def test_gt_dirs_116_points_at_the_unforked_ground_truth(monkeypatch, tmp_path):
     # runner uses to point the oracle at its own data directory, unrelated to
     # this fix and must survive it.
     assert mod.DATA_DIR == str(tmp_path)
+
+
+# --- MATRIX_PATH: $VEPYR_MATRIX > $WORK_DIR/matrix.tsv > the shipped copy ----
+#
+# matrix.tsv used to exist ONLY on the cluster, at $VEPYR_WORK/matrix.tsv -- so a
+# fresh clone of this repo (the container image being built around it, a laptop, a
+# CI runner) had no matrix.tsv anywhere and this CLI could not run at all. A copy
+# fetched from the cluster is now shipped at <repo root>/matrix.tsv (see
+# matrix.tsv.README beside it) as the last link of a 3-way fallback chain -- see
+# the comment beside MATRIX_PATH in bin/validate.py for the exact order.
+#
+# Each test below is built so it FAILS if that one link of the chain is missing or
+# out of order -- e.g. test_matrix_path_falls_back_to_the_shipped_copy_when_
+# work_dir_has_none would fail against the PRE-FIX code (unconditional
+# WORK_DIR/matrix.tsv), because that resolves to a tmp_path under WORK_DIR that
+# does not exist, never to the shipped copy. A fallback chain whose failing
+# direction is never exercised is not actually tested -- see the task's
+# self-review note.
+
+def test_matrix_path_falls_back_to_the_shipped_copy_when_work_dir_has_none(
+        monkeypatch, tmp_path):
+    monkeypatch.delenv("VEPYR_MATRIX", raising=False)
+    monkeypatch.setenv("VEPYR_DATA", str(tmp_path / "data"))
+    work = tmp_path / "work"
+    work.mkdir()                              # exists, but no matrix.tsv inside
+    monkeypatch.setenv("VEPYR_WORK", str(work))
+
+    mod = _load_validate()
+
+    assert mod.MATRIX_PATH == os.path.join(ROOT, "matrix.tsv")
+    # Not just the right path -- the shipped copy must actually BE there, or a
+    # fresh clone is exactly as unable to run as before this fix.
+    assert os.path.exists(mod.MATRIX_PATH)
+
+
+def test_matrix_path_prefers_the_cluster_copy_when_work_dir_has_one(monkeypatch, tmp_path):
+    """The cluster's own freshly-seeded matrix.tsv must keep winning over the
+    shipped copy -- this is what pins "existing cluster behaviour is unchanged".
+    Against a fix that got the fallback order backwards (shipped copy preferred
+    over VEPYR_WORK), this would resolve to <repo root>/matrix.tsv instead and
+    fail."""
+    monkeypatch.delenv("VEPYR_MATRIX", raising=False)
+    monkeypatch.setenv("VEPYR_DATA", str(tmp_path / "data"))
+    work = tmp_path / "work"
+    work.mkdir()
+    cluster_matrix = work / "matrix.tsv"
+    cluster_matrix.write_text("name\tcache_flavor\tcache115\tcache116\t"
+                              "vepyr_kwargs\tvep_flags\tgt115\tgt116\n")
+    monkeypatch.setenv("VEPYR_WORK", str(work))
+
+    mod = _load_validate()
+
+    assert mod.MATRIX_PATH == str(cluster_matrix)
+    assert mod.MATRIX_PATH != os.path.join(ROOT, "matrix.tsv")
+
+
+def test_matrix_path_explicit_override_wins_over_both(monkeypatch, tmp_path):
+    """VEPYR_MATRIX must win even when a cluster copy ALSO exists under
+    VEPYR_WORK -- the harder case to satisfy by accident (a fix that forgot the
+    override entirely would still pass a test where no VEPYR_WORK copy exists).
+    Against that wrong fix, this resolves to the VEPYR_WORK copy instead and
+    fails."""
+    monkeypatch.setenv("VEPYR_DATA", str(tmp_path / "data"))
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "matrix.tsv").write_text("name\tcache_flavor\tcache115\tcache116\t"
+                                     "vepyr_kwargs\tvep_flags\tgt115\tgt116\n")
+    explicit = tmp_path / "pinned_matrix.tsv"
+    explicit.write_text("name\tcache_flavor\tcache115\tcache116\t"
+                        "vepyr_kwargs\tvep_flags\tgt115\tgt116\n")
+    monkeypatch.setenv("VEPYR_WORK", str(work))
+    monkeypatch.setenv("VEPYR_MATRIX", str(explicit))
+
+    mod = _load_validate()
+
+    assert mod.MATRIX_PATH == str(explicit)

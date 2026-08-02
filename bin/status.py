@@ -56,9 +56,26 @@ def _resultsdir(step: Step, version: int) -> str:
     """The directory a step's outputs land in. MUST match the directories
     slurm/annotate.sbatch, slurm/diff.sbatch and slurm/gen_gt116.sh actually
     write to -- see those scripts' header comments; this is the canonical
-    Python-side definition of that convention."""
+    Python-side definition of that convention.
+
+    2026-07-30/2026-08-02: the GT branch used to return the plain
+    "ground_truth_vep_116" directory -- ground truth minted with `--fork N>1`.
+    That tree was deleted on 2026-07-30, correctly: forking narrows VEP's
+    InputBuffer (maxForkSize = buffer_size / (2 * fork)), so `--fork 16` shrinks
+    the annotation buffer window ~30x and the gene-symbol back-fill drops
+    HGNC_ID for transcripts that fall outside it -- see bin/fork_delta.py's
+    module docstring for the whole-genome measurement of that effect. It was
+    never a valid golden standard. This path was not moved when the directory
+    was, so every --version 116 status check has been reporting the `gt` step
+    as entirely `missing` since 2026-07-30 rather than reflecting its real
+    state. The identical defect in bin/validate.py's GT_DIRS was fixed in PR
+    #1; this one was left because its failure mode is milder -- this is a
+    human-facing progress CLI, so it misreports to a person rather than
+    silently feeding a gate verdict. Now points at the authoritative, unforked
+    ground truth.
+    """
     if step is Step.GT:
-        return os.path.join(DATA_DIR, "ground_truth_vep_116", "shards")
+        return os.path.join(DATA_DIR, "ground_truth_vep_116_unforked", "shards")
     return os.path.join(WORK_DIR, f"results_wgs_{version}")
 
 
