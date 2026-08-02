@@ -1,0 +1,39 @@
+matrix.tsv -- what this is and why it is versioned
+====================================================
+
+This is the COMBOS MATRIX: one row per in-scope combo (oracle.matrix.COMBOS),
+recording which annotation flags real VEP was run with (`vep_flags`) and the
+vepyr kwargs derived from them (`vepyr_kwargs`) -- see oracle/matrix.py's module
+docstring for why the vepyr side is DERIVED rather than hand-written.
+
+It is GENERATED, by bin/seed_matrix.py, from the `##VEP-command-line=` header
+that real VEP wrote into each combo's ground-truth VCF. It is not source code;
+it is a snapshot of what the ground truth (a multi-gigabyte tree that lives
+only on the cluster, under $VEPYR_DATA/ground_truth_vep*/) actually contains.
+
+Provenance of the copy in this repo:
+  fetched from      hpc:~/vepyr/work/matrix.tsv
+  fetched on        2026-08-02
+  cluster mtime     2026-07-23 09:43 CEST
+  size               5949 bytes
+  sha256             28bc22fad3d8a129ec3f10b155f704353d73f2dc798b47e58eb6e522185ffa48
+
+Why it is committed here instead of regenerated on demand: bin/seed_matrix.py
+needs the ground truth to regenerate this file, and the ground truth is
+multi-gigabyte -- a laptop, a CI runner, or a container build will not have it.
+Without a copy checked into the repo, a fresh clone of this repo has no
+matrix.tsv anywhere and bin/validate.py (and bin/run_wgs.py) cannot run at all,
+which defeats the point of shipping the harness in a container image.
+
+How it is found at runtime: bin/validate.py resolves MATRIX_PATH through a
+fallback chain -- see the comment beside MATRIX_PATH in that file for the exact
+order. In short: an explicit $VEPYR_MATRIX override wins if set; otherwise a
+freshly-seeded $VEPYR_WORK/matrix.tsv on the cluster wins over this shipped
+copy, so existing cluster behaviour is unchanged; this file is the fallback
+that makes a fresh clone runnable at all.
+
+This file is pinned `-text` in .gitattributes (it is CRLF, as fetched from the
+cluster) so no checkout, on any machine or git config, can silently rewrite its
+bytes -- see commit ed97de0 for the CRLF-drift bug class this guards against.
+Do not hand-edit it; regenerate with bin/seed_matrix.py on the cluster and
+re-fetch instead, so it always matches a real ground-truth run.

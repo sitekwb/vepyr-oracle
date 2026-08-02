@@ -1,0 +1,8 @@
+# matrix.tsv is fetched byte-for-byte from the cluster (CRLF line endings) and its
+# sha256 is recorded in matrix.tsv.README as a provenance check. `-text` stops git
+# from ever normalizing its line endings on any checkout, regardless of a user's
+# core.autocrlf -- this repo has already been bitten once by CRLF turning a real
+# drift into what looked like an empty comparison (commit ed97de0); matrix.tsv
+# feeds bin/validate.py's combo lookup on every run, so its bytes must stay exactly
+# what seed_matrix.py produced.
+matrix.tsv -text

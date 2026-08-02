@@ -48,7 +48,39 @@ from oracle.matrix import kwargs_from_row, load_matrix
 DATA_DIR = os.environ.get("VEPYR_DATA", os.path.expanduser("~/vepyr/data"))
 WORK_DIR = os.environ.get("VEPYR_WORK", os.path.expanduser("~/vepyr/work"))
 
-MATRIX_PATH = os.path.join(WORK_DIR, "matrix.tsv")
+# matrix.tsv is the combos matrix (one row per oracle.matrix.COMBOS entry): which
+# vepyr kwargs to run each combo with, DERIVED by bin/seed_matrix.py from the
+# ground truth's own `##VEP-command-line=` headers (see that script's docstring).
+# It used to exist ONLY on the cluster, at $VEPYR_WORK/matrix.tsv -- so a fresh
+# clone of this repo (e.g. the container image being built around it) had no
+# matrix.tsv anywhere, and this CLI could not run at all. A copy fetched from the
+# cluster (2026-07-23) is now versioned at <repo root>/matrix.tsv -- see
+# matrix.tsv.README beside it for provenance (sha256 included) -- as a fallback
+# for exactly that case. It is not regenerated at clone/build time: regeneration
+# needs bin/seed_matrix.py's multi-gigabyte ground truth input, which a laptop or
+# CI runner will not have.
+#
+# Resolution order (first that applies wins):
+#   1. $VEPYR_MATRIX, if set              -- explicit override, e.g. to pin a
+#                                             specific matrix for one validation run.
+#   2. $WORK_DIR/matrix.tsv, if it exists -- the cluster's freshly-seeded matrix
+#                                             always wins over the shipped copy, so
+#                                             existing cluster behaviour is unchanged.
+#   3. the copy shipped in the repo root  -- makes a fresh clone/container image
+#                                             runnable at all. Resolved relative to
+#                                             THIS file's own location, never the
+#                                             process cwd: the validation gate
+#                                             invokes this script by absolute path
+#                                             from an unrelated working directory.
+_MATRIX_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_WORK_MATRIX_PATH = os.path.join(WORK_DIR, "matrix.tsv")
+if os.environ.get("VEPYR_MATRIX"):
+    MATRIX_PATH = os.environ["VEPYR_MATRIX"]
+elif os.path.exists(_WORK_MATRIX_PATH):
+    MATRIX_PATH = _WORK_MATRIX_PATH
+else:
+    MATRIX_PATH = os.path.join(_MATRIX_REPO_ROOT, "matrix.tsv")
+
 # The ground truth lives in a DIFFERENT directory per VEP version:
 #   115 -> data/ground_truth_vep/                (shipped with the project)
 #   116 -> data/ground_truth_vep_116_unforked/    (minted by slurm/gen_gt116.sh +
