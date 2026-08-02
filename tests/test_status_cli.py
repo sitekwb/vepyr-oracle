@@ -111,3 +111,42 @@ def test_help_works_without_a_shards_file():
                        capture_output=True, text=True, timeout=10)
     assert r.returncode == 0, r.stderr
     assert "usage:" in r.stdout.lower()
+
+
+# --- gt step: must read from the UNFORKED ground truth directory -------------
+#
+# ground_truth_vep_116 (minted with `--fork N>1`) was deleted 2026-07-30 --
+# forking narrows VEP's InputBuffer ~30x and drops HGNC_ID from back-filled
+# transcripts, so it was never a valid golden standard (see bin/validate.py's
+# GT_DIRS comment, and _resultsdir()'s own docstring in bin/status.py, for the
+# full history). The identical defect in bin/validate.py's GT_DIRS was fixed in
+# PR #1; bin/status.py's Step.GT branch built this path directly (not through
+# GT_DIRS) and was left pointing at the deleted directory, so every --version 116
+# status check has been reporting the whole `gt` step as `missing` since
+# 2026-07-30 instead of reflecting its real state.
+#
+# _resultsdir()'s return value has no other observable seam from outside the
+# module -- it is only ever printed, inline, into the "=== gt (...) ===" header
+# (see bin/status.py's main()) -- so that header line is what this pins.
+
+def test_gt_step_reads_from_the_unforked_ground_truth_dir(tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    _write_shards(work / "shards_annotate.tsv", [_row()])
+    _write_shards(work / "shards_diff.tsv", [_row(step="diff")])
+    _write_shards(work / "shards_gt.tsv", [_row(step="gt")])
+
+    data = tmp_path / "data"
+    env = {**os.environ, "VEPYR_WORK": str(work), "VEPYR_DATA": str(data)}
+    r = _run(["--version", "116"], env=env)
+
+    assert r.returncode == 0, r.stderr
+    unforked_dir = str(data / "ground_truth_vep_116_unforked" / "shards")
+    forked_dir = str(data / "ground_truth_vep_116" / "shards")
+    # Against the PRE-FIX code this fails here: the header would carry
+    # forked_dir instead, never unforked_dir.
+    assert unforked_dir in r.stdout
+    # Belt-and-braces: the deleted, forked directory must not appear at all --
+    # guards against a fix that prints both rather than replacing one with the
+    # other.
+    assert forked_dir not in r.stdout
