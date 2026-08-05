@@ -20,12 +20,13 @@ The fix: the vepyr kwargs are DERIVED from the recovered VEP command line. Nothi
 hand-writes a combo's semantics any more, so the two sides cannot disagree.
 """
 import json
+import os
 
 import pytest
 
 from oracle.matrix import (COMBOS, NEEDS_PLUGIN_CACHE, extract_vep_command_line,
-                           load_matrix, resolve_kwargs, vep_flags_to_vepyr_kwargs,
-                           write_matrix)
+                           load_matrix, resolve_kwargs, resolve_matrix_path,
+                           vep_flags_to_vepyr_kwargs, write_matrix)
 
 # --- fixtures: the REAL command lines, recovered from the real ground truth ---
 #
@@ -464,3 +465,51 @@ def test_write_matrix_round_trips_the_sentinel_as_the_at_plugin_string(tmp_path)
     with pytest.raises(ValueError, match="plugin_cache_root is required"):
         resolve_kwargs(kwargs)
     assert resolve_kwargs(kwargs, plugin_cache_root="/x")["plugin_cache_root"] == "/x"
+
+
+# --- resolve_matrix_path: the 3-way fallback chain, unit-level ---------------
+#
+# bin/validate.py and bin/run_wgs.py both resolve their MATRIX_PATH global through
+# this one function (tests/test_cli.py pins that each CLI actually calls it, via
+# the module-level MATRIX_PATH it ends up with). These tests instead pin the
+# function's OWN precedence logic directly, independent of either CLI -- so a
+# regression here is diagnosable without going through a subprocess.
+
+def test_resolve_matrix_path_uses_the_repo_root_copy_when_work_dir_has_none(
+        monkeypatch, tmp_path):
+    monkeypatch.delenv("VEPYR_MATRIX", raising=False)
+    work_dir = str(tmp_path / "work")  # deliberately does not exist at all
+    repo_root = str(tmp_path / "repo")
+    assert resolve_matrix_path(work_dir, repo_root) == os.path.join(repo_root, "matrix.tsv")
+
+
+def test_resolve_matrix_path_prefers_work_dir_when_present(monkeypatch, tmp_path):
+    monkeypatch.delenv("VEPYR_MATRIX", raising=False)
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    (work_dir / "matrix.tsv").write_text("seeded\n")
+    repo_root = str(tmp_path / "repo")
+    assert resolve_matrix_path(str(work_dir), repo_root) == str(work_dir / "matrix.tsv")
+
+
+def test_resolve_matrix_path_override_wins_even_when_work_dir_has_a_copy(
+        monkeypatch, tmp_path):
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    (work_dir / "matrix.tsv").write_text("seeded\n")
+    explicit = tmp_path / "pinned.tsv"
+    explicit.write_text("pinned\n")
+    monkeypatch.setenv("VEPYR_MATRIX", str(explicit))
+    assert resolve_matrix_path(str(work_dir), str(tmp_path / "repo")) == str(explicit)
+
+
+def test_resolve_matrix_path_ignores_an_empty_override(monkeypatch, tmp_path):
+    """An explicitly-set but EMPTY $VEPYR_MATRIX (e.g. `VEPYR_MATRIX= cmd`) must
+    not win over a real cluster copy -- `os.environ.get` returns `""`, which is
+    falsy, so this falls through to the next link exactly like an unset var."""
+    monkeypatch.setenv("VEPYR_MATRIX", "")
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    (work_dir / "matrix.tsv").write_text("seeded\n")
+    assert (resolve_matrix_path(str(work_dir), str(tmp_path / "repo"))
+           == str(work_dir / "matrix.tsv"))

@@ -26,7 +26,7 @@ the derived kwargs and the command line they came from in the same row. The two
 sides of matrix.tsv cannot disagree, because one is a pure function of the other.
 """
 from __future__ import annotations
-import csv, json, shlex
+import csv, json, os, shlex
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Final
@@ -402,6 +402,71 @@ def write_matrix(path: str, vep_cmdlines_by_combo: dict[str, str]) -> None:
                 "gt115": c.gt115,
                 "gt116": f"{c.name}.vcf",
             })
+
+
+#: The env var an operator sets to pin one specific matrix.tsv for a run,
+#: overriding both the cluster's own copy and the shipped fallback. Owned
+#: entirely by `resolve_matrix_path()` -- unlike `$VEPYR_WORK`/`$VEPYR_DATA`, it
+#: has no other purpose in this codebase, so it is read directly from the
+#: environment here rather than threaded through as a parameter.
+_MATRIX_ENV_OVERRIDE = "VEPYR_MATRIX"
+
+
+def resolve_matrix_path(work_dir: str, repo_root: str) -> str:
+    """matrix.tsv's path, via the 3-way fallback chain every CONSUMER must share.
+
+    matrix.tsv used to exist ONLY on the cluster, at `$VEPYR_WORK/matrix.tsv` --
+    so a fresh clone of this repo (a container image being built around it, a
+    laptop, a CI runner) had no matrix.tsv anywhere and could not run at all. A
+    copy fetched from the cluster is now versioned at `<repo root>/matrix.tsv`
+    (see `matrix.tsv.README` beside it for provenance) as a fallback for exactly
+    that case.
+
+    Resolution order (first that applies wins):
+      1. `$VEPYR_MATRIX`, if set             -- explicit override, e.g. to pin a
+                                                 specific matrix for one run.
+      2. `<work_dir>/matrix.tsv`, if it exists -- the cluster's freshly-seeded
+                                                 matrix always wins over the
+                                                 shipped copy, so existing cluster
+                                                 behaviour is unchanged.
+      3. `<repo_root>/matrix.tsv`             -- the copy shipped in the repo
+                                                 root, so a fresh clone/container
+                                                 image is runnable at all.
+
+    This is the ONE place that chain is implemented. Every CLI that reads
+    matrix.tsv (`bin/validate.py`, `bin/run_wgs.py`, ...) must call this instead
+    of resolving its own copy of the same rule: `bin/run_wgs.py` used to read
+    `os.path.join(WORK_DIR, "matrix.tsv")` unconditionally -- no override, no
+    shipped-copy fallback -- the identical defect `bin/validate.py` had before it
+    gained this chain. Two independent, silently-diverging implementations of one
+    precedence rule is exactly how that kind of gap reopens; sharing this
+    function is what keeps a future third entrypoint from repeating it.
+
+    Args:
+        work_dir: the caller's already-resolved `$VEPYR_WORK` (or its
+            `~/vepyr/work` default) -- the value it already computes for its own
+            other purposes, not re-derived here.
+        repo_root: the repository root to resolve the shipped fallback copy
+            against, resolved by the CALLER from ITS OWN `__file__` (never this
+            module's) -- so the answer is always correct relative to the invoked
+            script's own location, never the process cwd (the validation gate
+            invokes these scripts by absolute path from an unrelated cwd) and
+            never an assumption that every caller sits at the same directory
+            depth as `oracle/matrix.py` itself.
+
+    Returns:
+        The resolved matrix.tsv path. NOT guaranteed to exist: an explicit
+        `$VEPYR_MATRIX` override or a stale cluster copy can still name a file
+        that `load_matrix()` will fail to open -- that surfaces as a clear
+        `FileNotFoundError` rather than being masked here.
+    """
+    override = os.environ.get(_MATRIX_ENV_OVERRIDE)
+    if override:
+        return override
+    work_copy = os.path.join(work_dir, "matrix.tsv")
+    if os.path.exists(work_copy):
+        return work_copy
+    return os.path.join(repo_root, "matrix.tsv")
 
 
 def load_matrix(path: str) -> dict[str, dict]:
