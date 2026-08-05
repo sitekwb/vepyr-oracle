@@ -39,9 +39,10 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _REPO_ROOT)
 from oracle.diff import diff_files
-from oracle.matrix import kwargs_from_row, load_matrix
+from oracle.matrix import kwargs_from_row, load_matrix, resolve_matrix_path
 
 #: Overridable so the smoke tests (tests/test_cli.py) can point this CLI at a tmp
 #: dir instead of the real cluster paths, without touching ~/vepyr at all.
@@ -60,26 +61,13 @@ WORK_DIR = os.environ.get("VEPYR_WORK", os.path.expanduser("~/vepyr/work"))
 # needs bin/seed_matrix.py's multi-gigabyte ground truth input, which a laptop or
 # CI runner will not have.
 #
-# Resolution order (first that applies wins):
-#   1. $VEPYR_MATRIX, if set              -- explicit override, e.g. to pin a
-#                                             specific matrix for one validation run.
-#   2. $WORK_DIR/matrix.tsv, if it exists -- the cluster's freshly-seeded matrix
-#                                             always wins over the shipped copy, so
-#                                             existing cluster behaviour is unchanged.
-#   3. the copy shipped in the repo root  -- makes a fresh clone/container image
-#                                             runnable at all. Resolved relative to
-#                                             THIS file's own location, never the
-#                                             process cwd: the validation gate
-#                                             invokes this script by absolute path
-#                                             from an unrelated working directory.
-_MATRIX_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_WORK_MATRIX_PATH = os.path.join(WORK_DIR, "matrix.tsv")
-if os.environ.get("VEPYR_MATRIX"):
-    MATRIX_PATH = os.environ["VEPYR_MATRIX"]
-elif os.path.exists(_WORK_MATRIX_PATH):
-    MATRIX_PATH = _WORK_MATRIX_PATH
-else:
-    MATRIX_PATH = os.path.join(_MATRIX_REPO_ROOT, "matrix.tsv")
+# The 3-way fallback chain ($VEPYR_MATRIX > $WORK_DIR/matrix.tsv > the shipped
+# copy) now lives in oracle.matrix.resolve_matrix_path() -- see its docstring for
+# the exact order and reasoning -- so every consumer shares ONE implementation of
+# this precedence rule instead of each keeping its own copy that can silently
+# drift out of sync (that drift is exactly how bin/run_wgs.py ended up with no
+# fallback chain at all: this rule used to be written out inline, here only).
+MATRIX_PATH = resolve_matrix_path(WORK_DIR, _REPO_ROOT)
 
 # The ground truth lives in a DIFFERENT directory per VEP version:
 #   115 -> data/ground_truth_vep/                (shipped with the project)

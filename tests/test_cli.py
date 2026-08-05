@@ -344,3 +344,98 @@ def test_matrix_path_explicit_override_wins_over_both(monkeypatch, tmp_path):
     mod = _load_validate()
 
     assert mod.MATRIX_PATH == str(explicit)
+
+
+# --- run_wgs.py: MATRIX_PATH must resolve through the SAME chain ------------
+#
+# bin/run_wgs.py read `os.path.join(WORK_DIR, "matrix.tsv")` unconditionally --
+# no $VEPYR_MATRIX override, no shipped-copy fallback. The identical defect
+# bin/validate.py had before it gained the 3-way chain tested above (PR #2), left
+# unfixed here because that PR was scoped to two specific fixes. It cost a real
+# debugging session: a measurement on a Mac was pointed at a correct matrix via
+# $VEPYR_MATRIX; run_wgs.py ignored it, silently fell through to a stale
+# $VEPYR_WORK/matrix.tsv (dated 12 July, empty vepyr_kwargs cells in all eight
+# rows), and died with "[FATAL] combo 'hgvs_merged' has an EMPTY vepyr_kwargs
+# cell" -- see kwargs_from_row()'s docstring for why refusing an empty cell is
+# correct and must not be weakened.
+#
+# These three tests are test_matrix_path_*'s counterparts for run_wgs.py, and are
+# built the same way: each FAILS if the one link of the chain it names is missing
+# or out of order. Together they prove PRECEDENCE, not merely "reads some file":
+# test_run_wgs_matrix_path_prefers_the_cluster_copy_when_work_dir_has_one is the
+# positive control -- with $VEPYR_MATRIX unset, $WORK_DIR must still win, so a fix
+# that hard-codes $VEPYR_MATRIX and ignores $WORK_DIR entirely would fail it.
+# test_run_wgs_matrix_path_explicit_override_wins_over_both is the one the
+# pre-fix code actually fails (unconditional $WORK_DIR/matrix.tsv never looks at
+# $VEPYR_MATRIX at all).
+
+def _load_run_wgs():
+    """bin/run_wgs.py as a module -- same load-by-path mechanism as
+    _load_validate()."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_run_wgs", RUN_WGS)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_run_wgs_matrix_path_falls_back_to_the_shipped_copy_when_work_dir_has_none(
+        monkeypatch, tmp_path):
+    monkeypatch.delenv("VEPYR_MATRIX", raising=False)
+    monkeypatch.setenv("VEPYR_DATA", str(tmp_path / "data"))
+    work = tmp_path / "work"
+    work.mkdir()                              # exists, but no matrix.tsv inside
+    monkeypatch.setenv("VEPYR_WORK", str(work))
+
+    mod = _load_run_wgs()
+
+    assert mod.MATRIX_PATH == os.path.join(ROOT, "matrix.tsv")
+    # Not just the right path -- the shipped copy must actually BE there, or a
+    # fresh clone is exactly as unable to run as before this fix.
+    assert os.path.exists(mod.MATRIX_PATH)
+
+
+def test_run_wgs_matrix_path_prefers_the_cluster_copy_when_work_dir_has_one(
+        monkeypatch, tmp_path):
+    """Positive control: with $VEPYR_MATRIX UNSET, the cluster's own
+    freshly-seeded matrix.tsv must still win over the shipped copy -- proves this
+    is a precedence chain, not just an early-return on $VEPYR_MATRIX. The
+    pre-fix code also happens to resolve this case correctly (it always used
+    $WORK_DIR/matrix.tsv), which is exactly why this test alone cannot tell the
+    fix apart from the bug -- see the override test below, which the pre-fix code
+    fails."""
+    monkeypatch.delenv("VEPYR_MATRIX", raising=False)
+    monkeypatch.setenv("VEPYR_DATA", str(tmp_path / "data"))
+    work = tmp_path / "work"
+    work.mkdir()
+    cluster_matrix = work / "matrix.tsv"
+    cluster_matrix.write_text("name\tcache_flavor\tcache115\tcache116\t"
+                              "vepyr_kwargs\tvep_flags\tgt115\tgt116\n")
+    monkeypatch.setenv("VEPYR_WORK", str(work))
+
+    mod = _load_run_wgs()
+
+    assert mod.MATRIX_PATH == str(cluster_matrix)
+    assert mod.MATRIX_PATH != os.path.join(ROOT, "matrix.tsv")
+
+
+def test_run_wgs_matrix_path_explicit_override_wins_over_both(monkeypatch, tmp_path):
+    """The one the pre-fix code fails: bin/run_wgs.py used to read
+    $WORK_DIR/matrix.tsv unconditionally and never consulted $VEPYR_MATRIX at
+    all, so pointing a run at a correct matrix via $VEPYR_MATRIX silently did
+    nothing -- run_wgs.py used whatever stale copy happened to sit under
+    $VEPYR_WORK instead. This is the exact debugging session described above."""
+    monkeypatch.setenv("VEPYR_DATA", str(tmp_path / "data"))
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "matrix.tsv").write_text("name\tcache_flavor\tcache115\tcache116\t"
+                                     "vepyr_kwargs\tvep_flags\tgt115\tgt116\n")
+    explicit = tmp_path / "pinned_matrix.tsv"
+    explicit.write_text("name\tcache_flavor\tcache115\tcache116\t"
+                        "vepyr_kwargs\tvep_flags\tgt115\tgt116\n")
+    monkeypatch.setenv("VEPYR_WORK", str(work))
+    monkeypatch.setenv("VEPYR_MATRIX", str(explicit))
+
+    mod = _load_run_wgs()
+
+    assert mod.MATRIX_PATH == str(explicit)

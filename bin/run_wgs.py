@@ -50,16 +50,32 @@ import os
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _REPO_ROOT)
 from oracle.csq import open_maybe_gzip
-from oracle.matrix import kwargs_from_row, load_matrix, resolve_kwargs
+from oracle.matrix import kwargs_from_row, load_matrix, resolve_kwargs, resolve_matrix_path
 
 #: Overridable so the smoke tests (tests/test_cli.py) can point this CLI at a tmp
 #: dir instead of the real cluster paths, without touching ~/vepyr at all.
 DATA_DIR = os.environ.get("VEPYR_DATA", os.path.expanduser("~/vepyr/data"))
 WORK_DIR = os.environ.get("VEPYR_WORK", os.path.expanduser("~/vepyr/work"))
 
-MATRIX_PATH = os.path.join(WORK_DIR, "matrix.tsv")
+# matrix.tsv's path resolves through the SAME 3-way fallback chain as
+# bin/validate.py ($VEPYR_MATRIX > $WORK_DIR/matrix.tsv > the copy shipped at
+# <repo root>/matrix.tsv) -- see oracle.matrix.resolve_matrix_path()'s docstring
+# for the exact order and reasoning.
+#
+# This used to be `os.path.join(WORK_DIR, "matrix.tsv")` unconditionally: no
+# $VEPYR_MATRIX override, no shipped-copy fallback -- the identical defect
+# bin/validate.py had before it gained the chain (PR #2), left unfixed here at
+# the time because that PR was scoped to two specific fixes elsewhere. It cost a
+# real debugging session: a measurement on a Mac was pointed at a correct matrix
+# via $VEPYR_MATRIX; this script ignored it, silently fell through to a stale
+# $VEPYR_WORK/matrix.tsv with an EMPTY vepyr_kwargs cell in every row, and died
+# with "[FATAL] combo 'hgvs_merged' has an EMPTY vepyr_kwargs cell" -- see
+# kwargs_from_row()'s docstring for why that refusal is correct and must never be
+# weakened into a silent `{}` fallback.
+MATRIX_PATH = resolve_matrix_path(WORK_DIR, _REPO_ROOT)
 
 #: CRITICAL: this MUST be the NORMALIZED input, never the raw, un-normalized
 #: benchmark VCF. Every ground-truth VCF's `##VEP-command-line=` header says
