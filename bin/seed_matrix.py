@@ -37,7 +37,18 @@ from oracle.matrix import (COMBOS, extract_vep_command_line, vep_flags_to_vepyr_
 DATA_DIR = os.environ.get("VEPYR_DATA", os.path.expanduser("~/vepyr/data"))
 WORK_DIR = os.environ.get("VEPYR_WORK", os.path.expanduser("~/vepyr/work"))
 
-GT_DIR = os.path.join(DATA_DIR, "ground_truth_vep")
+#: 2026-08-31: was plain "ground_truth_vep". The matrix is DERIVED from the ground
+#: truth's own `##VEP-command-line=` headers, so the tree it reads decides what every
+#: combo means to vepyr -- and the old tree's `everything` was the one file built
+#: without `--fasta`/`--hgvs`. Seeding from it produced an `everything` row whose
+#: derived kwargs said "no HGVS", against a ground truth that indeed had none: self-
+#: consistent, and wrong about VEP. The canonical tree (bin/validate.py's GT_DIRS[115],
+#: same rebuild) is what this must read. NOTE for whoever regenerates: the shipped
+#: matrix.tsv was seeded from the OLD tree, so a re-seed WILL change the `everything`
+#: row, and the campaign gate that pins matrix.tsv by md5
+#: (vepyr-gt-validation slurm/gt115_2_gates.sh, require_canonical_matrix) will refuse
+#: the new file until its pin is updated on purpose. That is the pin doing its job.
+GT_DIR = os.path.join(DATA_DIR, "ground_truth_vep_115_2_unforked")
 OUT = os.path.join(WORK_DIR, "matrix.tsv")
 
 

@@ -141,7 +141,7 @@ def test_validate_resume_skips_an_existing_summary(tmp_path):
 def test_validate_writes_no_gt_summary_and_exits_0_when_gt_is_absent(tmp_path):
     data_dir = tmp_path / "data"
     work_dir = tmp_path / "work"
-    (data_dir / "ground_truth_vep").mkdir(parents=True)   # dir exists, file does not
+    (data_dir / "ground_truth_vep_115_2_unforked").mkdir(parents=True)  # dir exists, file does not
     work_dir.mkdir()
     _write_matrix(str(work_dir / "matrix.tsv"))
     outdir = tmp_path / "out"
@@ -166,7 +166,7 @@ def test_validate_runs_the_real_diff_when_gt_is_present(tmp_path):
     against oracle.diff.diff_files(), using the same fixtures test_diff.py uses."""
     data_dir = tmp_path / "data"
     work_dir = tmp_path / "work"
-    gt_dir = data_dir / "ground_truth_vep"
+    gt_dir = data_dir / "ground_truth_vep_115_2_unforked"
     gt_dir.mkdir(parents=True)
     work_dir.mkdir()
     (gt_dir / "hgvs_merged.vcf").write_text(
@@ -201,7 +201,7 @@ def test_validate_runs_the_real_diff_when_gt_is_present(tmp_path):
 def test_cli_refuses_a_combo_whose_kwargs_were_never_seeded(tmp_path, cli):
     data_dir = tmp_path / "data"
     work_dir = tmp_path / "work"
-    (data_dir / "ground_truth_vep").mkdir(parents=True)
+    (data_dir / "ground_truth_vep_115_2_unforked").mkdir(parents=True)
     work_dir.mkdir()
     _write_matrix(str(work_dir / "matrix.tsv"), vepyr_kwargs="", vep_flags="")
 
@@ -221,7 +221,7 @@ def test_cli_refuses_a_combo_whose_kwargs_were_never_seeded(tmp_path, cli):
 def test_validate_unknown_combo_exits_nonzero_with_a_clear_message(tmp_path):
     data_dir = tmp_path / "data"
     work_dir = tmp_path / "work"
-    (data_dir / "ground_truth_vep").mkdir(parents=True)
+    (data_dir / "ground_truth_vep_115_2_unforked").mkdir(parents=True)
     work_dir.mkdir()
     _write_matrix(str(work_dir / "matrix.tsv"))
 
@@ -254,16 +254,20 @@ def _load_validate():
     return mod
 
 
-def test_gt_dirs_116_points_at_the_unforked_ground_truth(monkeypatch, tmp_path):
+def test_gt_dirs_point_at_the_unforked_ground_truths(monkeypatch, tmp_path):
     # VEPYR_DATA must be set BEFORE the module executes -- DATA_DIR/GT_DIRS are
     # computed at module-exec time, same as every other CLI in bin/.
     monkeypatch.setenv("VEPYR_DATA", str(tmp_path))
     mod = _load_validate()
 
     assert mod.GT_DIRS[116].endswith("ground_truth_vep_116_unforked")
-    # Positive control: 115 must be untouched -- proves the fix moved exactly one
-    # path, not both.
-    assert mod.GT_DIRS[115] == os.path.join(mod.DATA_DIR, "ground_truth_vep")
+    # 2026-08-31: 115 moved too, to the whole-genome rebuild the owner declared
+    # canonical. The retired tree's name is spelled out so that repointing at it
+    # again -- the exact regression the 116 half of this test was written for --
+    # cannot pass silently.
+    assert mod.GT_DIRS[115] == os.path.join(
+        mod.DATA_DIR, "ground_truth_vep_115_2_unforked")
+    assert not mod.GT_DIRS[115].endswith("/ground_truth_vep")
     # DATA_DIR must still be driven by VEPYR_DATA -- the hook a containerised
     # runner uses to point the oracle at its own data directory, unrelated to
     # this fix and must survive it.
