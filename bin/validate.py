@@ -70,7 +70,7 @@ WORK_DIR = os.environ.get("VEPYR_WORK", os.path.expanduser("~/vepyr/work"))
 MATRIX_PATH = resolve_matrix_path(WORK_DIR, _REPO_ROOT)
 
 # The ground truth lives in a DIFFERENT directory per VEP version:
-#   115 -> data/ground_truth_vep/                (shipped with the project)
+#   115 -> data/ground_truth_vep_115_2_unforked/  (rebuilt 2026-08-27, see below)
 #   116 -> data/ground_truth_vep_116_unforked/    (minted by slurm/gen_gt116.sh +
 #                                                  merge_gt116.sh with VEPYR_GT116_DIR
 #                                                  pointed at the _unforked tree)
@@ -89,8 +89,25 @@ MATRIX_PATH = resolve_matrix_path(WORK_DIR, _REPO_ROOT)
 # went unnoticed because a no_gt summary reads, downstream, as "nothing to
 # report" rather than "nothing was measured". Now points at the authoritative,
 # unforked ground truth.
+#
+# 2026-08-31: the 115 entry moved from plain "ground_truth_vep" to
+# "ground_truth_vep_115_2_unforked" -- the sharded, whole-genome rebuild measured
+# in sitekwb/vepyr-gt-validation docs/gt115_2/S1-findings.md (ten combos, each
+# 4,096,123 records, every header `##VEP="v115.2"`). This is NOT the 116 story
+# repeated: the old 115 tree was never forked (no `##VEP-command-line=` in any of
+# its ten files carries `--fork`, positive control: the same image stamps
+# `--fork 4` when asked to). Seven of the ten rebuilt combos are byte-identical
+# in the body to the old ones and two differ only in CSQ block emission order, so
+# for nine combos this move changes the path and nothing else. It is the tenth
+# that makes it a correctness change: the old `everything` was the ONE file built
+# without `--fasta`/`--hgvs`, so its CSQ declared 79 subfields instead of 80 and
+# its HGVSc/HGVSp/HGVS_OFFSET columns were EMPTY -- 29,406,336 + 184,933 +
+# 2,340,668 cells that no diff against it could ever score. Pointing at the old
+# tree therefore measured HGVS against a ground truth that had none. The owner
+# retired that file as ground truth on 2026-08-31 (decision A2); this line is
+# what enacts it.
 GT_DIRS = {
-    115: os.path.join(DATA_DIR, "ground_truth_vep"),
+    115: os.path.join(DATA_DIR, "ground_truth_vep_115_2_unforked"),
     116: os.path.join(DATA_DIR, "ground_truth_vep_116_unforked"),
 }
 

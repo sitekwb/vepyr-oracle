@@ -36,8 +36,8 @@ def _write_gt(gt_dir, combo, cmdline: str | None) -> None:
 
 @pytest.fixture
 def cluster(tmp_path):
-    """A fake ~/vepyr: data/ground_truth_vep/ with all 8 real GT headers."""
-    gt_dir = tmp_path / "data" / "ground_truth_vep"
+    """A fake ~/vepyr: data/ground_truth_vep_115_2_unforked/ with all 8 real GT headers."""
+    gt_dir = tmp_path / "data" / "ground_truth_vep_115_2_unforked"
     gt_dir.mkdir(parents=True)
     (tmp_path / "work").mkdir()
     for combo in COMBOS:
@@ -94,7 +94,7 @@ def test_prints_both_sides_of_every_combo_so_a_human_can_eyeball_them(cluster):
 
 
 def test_missing_ground_truth_exits_nonzero_and_leaves_that_row_empty(cluster):
-    os.remove(cluster / "data" / "ground_truth_vep" /
+    os.remove(cluster / "data" / "ground_truth_vep_115_2_unforked" /
               next(c for c in COMBOS if c.name == "hgvs_refseq").gt115)
 
     result = _run(cluster)
@@ -110,7 +110,7 @@ def test_missing_ground_truth_exits_nonzero_and_leaves_that_row_empty(cluster):
 
 def test_header_without_a_vep_command_line_exits_nonzero(cluster):
     combo = next(c for c in COMBOS if c.name == "hgvs_merged_am")
-    _write_gt(cluster / "data" / "ground_truth_vep", combo, None)
+    _write_gt(cluster / "data" / "ground_truth_vep_115_2_unforked", combo, None)
 
     result = _run(cluster)
     assert result.returncode != 0
@@ -121,7 +121,7 @@ def test_an_unmappable_flag_exits_nonzero_and_never_writes_a_guessed_row(cluster
     """The failure mode that matters: a flag we cannot map must NOT quietly become a
     row of kwargs that omits it. Loud, and the cell stays empty."""
     combo = next(c for c in COMBOS if c.name == "hgvs_merged")
-    _write_gt(cluster / "data" / "ground_truth_vep", combo,
+    _write_gt(cluster / "data" / "ground_truth_vep_115_2_unforked", combo,
               "vep --everything --hgvs --merged --minimal --cache")
 
     result = _run(cluster)
@@ -137,7 +137,7 @@ def test_a_cache_flavor_disagreement_exits_nonzero(cluster):
     """GT built against the refseq cache, matrix says merged: caught at seed time,
     not discovered as a thousand phantom 'missing transcript' findings later."""
     combo = next(c for c in COMBOS if c.name == "hgvs_merged")
-    _write_gt(cluster / "data" / "ground_truth_vep", combo,
+    _write_gt(cluster / "data" / "ground_truth_vep_115_2_unforked", combo,
               "vep --everything --hgvs --refseq --cache")
 
     result = _run(cluster)
